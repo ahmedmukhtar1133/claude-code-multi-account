@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- If a second copy of the extension is running in the same window (for example a `.vsix` next to the store version), the second copy now stays inactive instead of switching the window to the default account, and the active copy warns that the extension is installed twice.
+
 ## 0.1.0
 
 - A different Claude account in each VS Code window, set through `CLAUDE_CONFIG_DIR` before Claude Code starts. The default account (`~/.claude`) keeps its login untouched.

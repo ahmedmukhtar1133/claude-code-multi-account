@@ -769,13 +769,43 @@ async function offerAdoptActive(a: Account): Promise<void> {
 
 export function activate(context: vscode.ExtensionContext): void {
   ctx = context;
-  // First, before Claude Code starts: pick the account and set the variable.
+  // Commands first: if they are taken, another copy of this extension is running in this window
+  // (for example a .vsix next to the store version, or an old ID not yet unloaded). That copy owns
+  // the window's account, so this one must not touch the variable, the status bar or the handoff file.
+  const reg = (id: string, fn: () => Promise<void>) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
+  try {
+    reg('claudeMultiAccount.switch', cmdSwitch);
+    reg('claudeMultiAccount.addAccount', cmdAddAccount);
+    reg('claudeMultiAccount.renameAccount', () => cmdRename());
+    reg('claudeMultiAccount.adoptFolder', () => cmdAdoptFolder());
+    reg('claudeMultiAccount.undoAdoption', cmdUndo);
+    reg('claudeMultiAccount.repair', cmdRepair);
+    reg('claudeMultiAccount.doctor', cmdDoctor);
+    reg('claudeMultiAccount.syncMcp', cmdSyncMcp);
+  } catch (e) {
+    const out = vscode.window.createOutputChannel('Claude Code Multi-Account (inactive copy)');
+    context.subscriptions.push(out);
+    out.appendLine(`Another copy of this extension is already running in this window, so this one (${context.extension.id}) stays inactive and leaves the account alone. Uninstall one of them and reload. (${e instanceof Error ? e.message : String(e)})`);
+    return;
+  }
+  // Then, before Claude Code starts: pick the account and set the variable.
   active = chosenAccount();
   if (active) applyEnv(active);
 
   log = vscode.window.createOutputChannel('Claude Code Multi-Account');
   context.subscriptions.push(log);
   log.appendLine(`Window account: ${active?.name ?? 'none'}${chosenBecause ? ` (${chosenBecause})` : ''}; CLAUDE_CONFIG_DIR ${process.env.CLAUDE_CONFIG_DIR ?? 'unset'}`);
+
+  const twins = vscode.extensions.all.filter(
+    (x) => x.id !== context.extension.id && ((x.packageJSON?.contributes?.commands ?? []) as { command?: string }[]).some((c) => c.command?.startsWith('claudeMultiAccount.')),
+  );
+  if (twins.length) {
+    const ids = twins.map((x) => x.id).join(', ');
+    log.appendLine(`Another copy is installed: ${ids}. Only one should be.`);
+    void vscode.window
+      .showWarningMessage(`Claude Code Multi-Account is installed twice (${ids}). Uninstall the extra copy and reload, or the two can fight over this window's account.`, 'Show in Extensions')
+      .then((b) => b && vscode.commands.executeCommand('workbench.extensions.action.showExtensionsWithIds', twins.map((x) => x.id)));
+  }
 
   if (active) {
     const dir = accountDir(active, home);
@@ -787,16 +817,6 @@ export function activate(context: vscode.ExtensionContext): void {
   status.command = 'claudeMultiAccount.switch';
   context.subscriptions.push(status);
   renderStatus();
-
-  const reg = (id: string, fn: () => Promise<void>) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
-  reg('claudeMultiAccount.switch', cmdSwitch);
-  reg('claudeMultiAccount.addAccount', cmdAddAccount);
-  reg('claudeMultiAccount.renameAccount', () => cmdRename());
-  reg('claudeMultiAccount.adoptFolder', () => cmdAdoptFolder());
-  reg('claudeMultiAccount.undoAdoption', cmdUndo);
-  reg('claudeMultiAccount.repair', cmdRepair);
-  reg('claudeMultiAccount.doctor', cmdDoctor);
-  reg('claudeMultiAccount.syncMcp', cmdSyncMcp);
 
   panel = new PanelProvider(panelState, onPanelMessage);
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('claudeMultiAccount.panel', panel));
