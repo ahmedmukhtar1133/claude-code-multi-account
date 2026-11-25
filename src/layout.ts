@@ -34,6 +34,27 @@ export const MIXED_DIRS: Readonly<Record<string, readonly string[]>> = {
   plugins: ['synced'],
 };
 
+/**
+ * Files in a mixed folder that Claude Code rewrites on every start by replacing the file
+ * (which breaks a link): caches and timestamps. They stay per account.
+ */
+const MIXED_OWN_FILES: Readonly<Record<string, readonly RegExp[]>> = {
+  plugins: [/^\./, /cache[^/]*\.json$/i],
+};
+
+/** True when a child of a mixed folder belongs to the account rather than the store. */
+export function isOwnInMixed(dir: string, child: string): boolean {
+  return (MIXED_DIRS[dir] ?? []).includes(child) || (MIXED_OWN_FILES[dir] ?? []).some((r) => r.test(child));
+}
+
+/**
+ * Shared JSON files that Claude Code replaces on start (breaking the link). Instead of treating the
+ * account's copy as a clash, its entries are merged into the store by key, newest lastUpdated wins.
+ */
+export const MERGED_JSON: Readonly<Record<string, ReadonlySet<string>>> = {
+  plugins: new Set(['known_marketplaces.json']),
+};
+
 /** Entries this extension never links, moves or merges. */
 export const NEVER_TOUCH: ReadonlySet<string> = new Set([
   '.claude-manager',

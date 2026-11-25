@@ -2,7 +2,7 @@
   "name": "claude-code-multi-account-shared-history",
   "displayName": "Claude Code Multi-Account: Shared History",
   "description": "A different Claude account in each VS Code window, with one shared history, memory, skills and settings. Unofficial, not affiliated with Anthropic. Never reads login data, makes no network calls.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "deskworthy",
   "license": "MIT",
   "icon": "media/icon.png",

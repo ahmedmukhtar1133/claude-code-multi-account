@@ -228,3 +228,43 @@ test('clashing plugin marketplace files never land in the store', () => {
     cleanup(home);
   }
 });
+
+test('plugin caches stay per account; known_marketplaces.json merges into the store', () => {
+  const home = tempHome();
+  try {
+    const store = path.join(home, '.claude');
+    const work = path.join(home, '.claude-work');
+    write(store, {
+      'plugins/installed_plugins.json': '{}',
+      'plugins/plugin-directory-cache-v2.json': 'store cache',
+      'plugins/.last_inuse_sweep': '2026-01-01',
+      'plugins/known_marketplaces.json': JSON.stringify({ a: { lastUpdated: '2026-01-01T00:00:00Z', v: 'store' }, b: { lastUpdated: '2026-01-01T00:00:00Z', v: 'store' } }),
+      'plugins/synced/': '',
+    });
+    write(work, { 'settings.local.json': '{}' });
+    repair({ home, accountRoot: work, tag: 'work' });
+    assert.ok(isSymlink(path.join(work, 'plugins', 'installed_plugins.json')));
+    assert.ok(isSymlink(path.join(work, 'plugins', 'known_marketplaces.json')));
+    assert.ok(!fs.existsSync(path.join(work, 'plugins', 'plugin-directory-cache-v2.json')), 'caches are not linked');
+
+    // Claude Code starts on Work: it replaces the links with its own files.
+    for (const f of ['known_marketplaces.json', 'plugin-directory-cache-v2.json', '.last_inuse_sweep']) fs.rmSync(path.join(work, 'plugins', f), { force: true });
+    write(work, {
+      'plugins/plugin-directory-cache-v2.json': 'work cache',
+      'plugins/.last_inuse_sweep': '2026-02-01',
+      'plugins/known_marketplaces.json': JSON.stringify({ a: { lastUpdated: '2026-02-01T00:00:00Z', v: 'work' }, c: { lastUpdated: '2026-02-01T00:00:00Z', v: 'work-only' } }),
+    });
+    const r = repair({ home, accountRoot: work, tag: 'work' });
+    assert.deepEqual(r.notes.filter((n) => /differed|kept/i.test(n)), [], 'no clash notes');
+    assert.equal(read(work, 'plugins/plugin-directory-cache-v2.json'), 'work cache');
+    assert.equal(read(store, 'plugins/plugin-directory-cache-v2.json'), 'store cache');
+    assert.ok(!isSymlink(path.join(work, 'plugins', '.last_inuse_sweep')));
+    assert.ok(isSymlink(path.join(work, 'plugins', 'known_marketplaces.json')));
+    const merged = JSON.parse(read(store, 'plugins/known_marketplaces.json'));
+    assert.equal(merged.a.v, 'work', 'newer entry wins');
+    assert.equal(merged.b.v, 'store', 'store-only entry stays');
+    assert.equal(merged.c.v, 'work-only', 'account-only entry is added');
+  } finally {
+    cleanup(home);
+  }
+});

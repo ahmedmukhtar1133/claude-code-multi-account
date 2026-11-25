@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { classify, MIXED_DIRS, SHARED_FILES, SHARED_ITEMS } from './layout';
+import { classify, isOwnInMixed, MERGED_JSON, MIXED_DIRS, SHARED_FILES, SHARED_ITEMS } from './layout';
 import { isDanglingLink, isLinkTo, lstatOrNull, Platform } from './link';
 import { Account, accountDir, isDefault, storeDir } from './paths';
 
@@ -136,7 +136,9 @@ function checkAccount(a: Account, home: string, platform: Platform, unshared: Re
     const sDir = path.join(store, m);
     if (!fs.existsSync(sDir)) continue;
     for (const child of fs.readdirSync(sDir)) {
-      if (keep.includes(child)) continue;
+      if (keep.includes(child) || isOwnInMixed(m, child)) continue;
+      // Claude Code replaces these on start; Repair merges them back on the next window start.
+      if (MERGED_JSON[m]?.has(child)) continue;
       if (!isLinkTo(path.join(dir, m, child), path.join(sDir, child), platform)) broken.push(`${m}/${child}`);
     }
     const own = path.join(dir, m);
