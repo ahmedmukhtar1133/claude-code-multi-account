@@ -2,29 +2,59 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { adopt, isBlank, isSetUp, listRuns, markSetUp, repair, shareableSize, undo } from './adopt';
+import { adopt, clearSetUp, isBlank, isSetUp, listRuns, markSetUp, repair, shareableSize, undo } from './adopt';
 import { findClaude, isLoggedIn, runClaude } from './claudeCli';
 import { Finding, runDoctor } from './doctor';
 import { Busy } from './journal';
 import { projectKey } from './layout';
 import { describe, McpServer, parseGet, parseList } from './mcpSync';
-import { Account, accountDir, configDirEnv, isDefault, resolveFromHome, slug, storeDir } from './paths';
+import { PanelMessage, PanelProvider, PanelState } from './panel';
+import { Account, accountDir, configDirEnv, isDefault, resolveFromHome, slug, storeDir, supportDir } from './paths';
+import { recentSessions, sharedCounts } from './stats';
+
+const REPO_URL = 'https://github.com/ahmedmukhtar1133/claude-code-multi-account';
+const SITE_REF = '?ref=vscode&utm_campaign=claude-code-multi-account';
 
 const LAUNCH_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR;
 const home = os.homedir();
 const K_CHOICE = 'account';
 const K_EMPTY_WINDOW = 'emptyWindowAccount';
 const K_NO_SETUP_PROMPT = 'noSetupPrompt';
+/** A choice made in an empty window, carried to the next folder opened (from the welcome page or recent list). */
+const K_CARRY = 'carryToNextFolder';
+const CARRY_MS = 10 * 60 * 1000;
+/**
+ * When a window closes its folder (or reloads), it writes its account to this file, synchronously,
+ * so the next folder opened in that window starts on the same account. A file instead of
+ * globalState: the new extension host can start before an async globalState write lands.
+ */
+const HANDOFF_FILE = path.join(supportDir(home), 'window-handoff.json');
+const HANDOFF_MS = 8 * 1000;
+/** Account this window should hand over: set by a switch before its reload. */
+let handoffName: string | undefined;
+/** Where this window's account came from, for the log. */
+let chosenBecause = '';
+
+function takeHandoff(): string | undefined {
+  try {
+    const v = JSON.parse(fs.readFileSync(HANDOFF_FILE, 'utf8')) as { name?: string; at?: number };
+    fs.rmSync(HANDOFF_FILE, { force: true });
+    return v.name && v.at && Date.now() - v.at < HANDOFF_MS ? v.name : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 let log: vscode.OutputChannel;
 let status: vscode.StatusBarItem;
 let ctx: vscode.ExtensionContext;
 let active: Account | undefined;
 let signedIn: boolean | undefined;
+let panel: PanelProvider | undefined;
 
 // ---------- settings ----------
 
-const cfg = () => vscode.workspace.getConfiguration('sharedProfiles');
+const cfg = () => vscode.workspace.getConfiguration('claudeMultiAccount');
 
 function accounts(): Account[] {
   const raw = cfg().get<unknown[]>('accounts') ?? [];
@@ -50,13 +80,44 @@ function chosenAccount(): Account | undefined {
   const list = accounts();
   if (!list.length) return undefined;
   const byName = (n?: string) => (n ? list.find((a) => a.name === n) : undefined);
-  const stored = ctx.workspaceState.get<string>(K_CHOICE) ?? (vscode.workspace.workspaceFolders ? undefined : ctx.globalState.get<string>(K_EMPTY_WINDOW));
-  return byName(stored) ?? byName(cfg().get<string>('defaultAccount')) ?? list.find(isDefault) ?? list[0];
+
+  // 1. The same window a moment ago (folder change or reload): the window keeps its account.
+  const handed = byName(takeHandoff());
+  if (handed) {
+    chosenBecause = 'kept from this window before the folder changed or reloaded';
+    void ctx.workspaceState.update(K_CHOICE, handed.name);
+    if (!vscode.workspace.workspaceFolders) void ctx.globalState.update(K_EMPTY_WINDOW, handed.name);
+    return handed;
+  }
+  // 2. The choice saved for this folder (or for empty windows).
+  const saved = byName(ctx.workspaceState.get<string>(K_CHOICE) ?? (vscode.workspace.workspaceFolders ? undefined : ctx.globalState.get<string>(K_EMPTY_WINDOW)));
+  if (saved) {
+    chosenBecause = vscode.workspace.workspaceFolders ? 'saved for this folder' : 'saved for empty windows';
+    return saved;
+  }
+  // 3. A choice made in an empty window shortly before this folder was opened from it.
+  if (vscode.workspace.workspaceFolders) {
+    const carry = ctx.globalState.get<{ name: string; at: number }>(K_CARRY);
+    const carried = carry && Date.now() - carry.at < CARRY_MS ? byName(carry.name) : undefined;
+    if (carried) {
+      chosenBecause = 'carried over from the empty window this folder was opened from';
+      void ctx.workspaceState.update(K_CHOICE, carried.name);
+      void ctx.globalState.update(K_CARRY, undefined);
+      return carried;
+    }
+  }
+  const fallback = byName(cfg().get<string>('defaultAccount')) ?? list.find(isDefault) ?? list[0];
+  chosenBecause = 'default account';
+  return fallback;
 }
 
 async function rememberChoice(name: string): Promise<void> {
+  handoffName = name; // the reload that follows hands this account to the next start
   await ctx.workspaceState.update(K_CHOICE, name);
-  if (!vscode.workspace.workspaceFolders) await ctx.globalState.update(K_EMPTY_WINDOW, name);
+  if (!vscode.workspace.workspaceFolders) {
+    await ctx.globalState.update(K_EMPTY_WINDOW, name);
+    await ctx.globalState.update(K_CARRY, { name, at: Date.now() });
+  }
 }
 
 // ---------- the switch itself ----------
@@ -119,11 +180,162 @@ function renderStatus(): void {
   status.show();
 }
 
+let checking = false;
+let lastCheck = 0;
+
 async function refreshSignedIn(): Promise<void> {
   const bin = findClaude(home);
-  if (!bin || !active) return;
-  signedIn = await isLoggedIn(bin, configDirEnv(active, home));
+  if (!bin || !active || checking) return;
+  checking = true;
+  try {
+    signedIn = await isLoggedIn(bin, configDirEnv(active, home));
+    lastCheck = Date.now();
+    logins.set(active.name, { v: signedIn, at: lastCheck });
+  } finally {
+    checking = false;
+  }
   renderStatus();
+  void panel?.refresh();
+}
+
+// ---------- side panel ----------
+
+/** Sign-in state per account from `claude auth status`, kept for a minute. */
+const logins = new Map<string, { v: boolean | undefined; at: number }>();
+let loginsChecking = false;
+
+async function checkLogins(): Promise<void> {
+  const bin = findClaude(home);
+  if (!bin || loginsChecking) return;
+  const stale = accounts().filter((a) => Date.now() - (logins.get(a.name)?.at ?? 0) > 60_000);
+  if (!stale.length) return;
+  loginsChecking = true;
+  try {
+    await Promise.all(stale.map(async (a) => logins.set(a.name, { v: await isLoggedIn(bin, configDirEnv(a, home)), at: Date.now() })));
+  } finally {
+    loginsChecking = false;
+  }
+  if (active && logins.has(active.name)) signedIn = logins.get(active.name)!.v;
+  renderStatus();
+  void panel?.refresh();
+}
+
+function shortFolder(a: Account): string {
+  const dir = accountDir(a, home);
+  const rel = path.relative(home, dir);
+  return rel.startsWith('..') || path.isAbsolute(rel) ? dir : `~/${rel.split(path.sep).join('/')}`;
+}
+
+async function panelState(): Promise<PanelState> {
+  const list = accounts();
+  void checkLogins(); // fills in sign-in state, then refreshes the panel again
+  const key = currentProjectKey();
+  const projDir = key && active ? path.join(accountDir(active, home), 'projects', key) : undefined;
+  const findings = list.length
+    ? runDoctor({
+        home,
+        accounts: list,
+        claudeEnvSetting: vscode.workspace.getConfiguration('claudeCode').get('environmentVariables'),
+        claudeProcessWrapper: vscode.workspace.getConfiguration('claudeCode').get<string>('claudeProcessWrapper') || undefined,
+        extensions: vscode.extensions.all.map((e) => e.id),
+        loggedIn: Object.fromEntries([...logins].map(([k, v]) => [k, v.v])),
+        unsharedProjectKeys: unsharedKeys(),
+      })
+    : [];
+  return {
+    accounts: list.map((a) => ({
+      name: a.name,
+      folder: shortFolder(a),
+      isDefault: isDefault(a),
+      isCurrent: a.name === active?.name,
+      signedIn: a.name === active?.name && signedIn !== undefined ? signedIn : logins.get(a.name)?.v,
+    })),
+    candidates: list.length ? [] : candidateFolders().map((d) => ({ label: `~/${path.relative(home, d)}`, dir: d })),
+    sessions: projDir ? recentSessions(projDir, 10) : [],
+    hasProject: !!projDir,
+    health: findings,
+    shared: sharedCounts(storeDir(home)),
+    repoUrl: REPO_URL,
+    siteRef: SITE_REF,
+  };
+}
+
+async function onPanelMessage(m: PanelMessage): Promise<void> {
+  const byName = (n?: string) => accounts().find((a) => a.name === n);
+  switch (m.cmd) {
+    case 'switchPick':
+      return cmdSwitch();
+    case 'switchTo': {
+      const a = byName(m.arg);
+      if (a) await switchTo(a);
+      return;
+    }
+    case 'add':
+      return cmdAddAccount();
+    case 'adopt':
+      return cmdAdoptFolder(m.arg);
+    case 'copyMcp': {
+      if (!active) return;
+      const others = accounts().filter((a) => a.name !== active!.name);
+      const from = others.length === 1 ? others[0] : await pickAccount(`Copy MCP servers to "${active.name}" from`, active);
+      if (from) await syncMcp(from, active);
+      return;
+    }
+    case 'repair':
+      return cmdRepair();
+    case 'doctor':
+      return cmdDoctor();
+    case 'showExt':
+      if (m.arg) await vscode.commands.executeCommand('workbench.extensions.action.showExtensionsWithIds', m.arg.split(','));
+      return;
+    case 'openSession':
+      if (m.arg && /^[A-Za-z0-9-]+$/.test(m.arg)) {
+        await vscode.env.openExternal(vscode.Uri.parse(`${vscode.env.uriScheme}://anthropic.claude-code/open?session=${m.arg}`));
+      }
+      return;
+    case 'openUrl':
+      // Only our own links: the repo and deskworthy.app pages.
+      if (m.arg && (m.arg === REPO_URL || /^https:\/\/deskworthy\.app\/[a-z0-9/-]*\?ref=vscode&utm_campaign=claude-code-multi-account$/.test(m.arg))) {
+        await vscode.env.openExternal(vscode.Uri.parse(m.arg));
+      }
+      return;
+  }
+}
+
+/** Shares a new skill within seconds: watches the store's and this account's skills folders. */
+function watchSkills(): void {
+  const dirs = [path.join(storeDir(home), 'skills')];
+  if (active && !isDefault(active)) dirs.push(path.join(accountDir(active, home), 'skills'));
+  let timer: NodeJS.Timeout | undefined;
+  const onChange = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      for (const a of accounts()) if (!isDefault(a) && isSetUp(accountDir(a, home))) repairOne(a, true);
+      void panel?.refresh();
+    }, 3000);
+  };
+  for (const d of dirs) {
+    try {
+      const w = fs.watch(d, { persistent: false }, onChange);
+      ctx.subscriptions.push({ dispose: () => w.close() });
+    } catch {
+      /* folder not there yet */
+    }
+  }
+  ctx.subscriptions.push({ dispose: () => clearTimeout(timer) });
+}
+
+/** Re-checks after a sign-in: every 20 s while signed out, and whenever the window regains focus. */
+function watchSignIn(): void {
+  const timer = setInterval(() => {
+    if (signedIn === false) void refreshSignedIn();
+  }, 20_000);
+  ctx.subscriptions.push({ dispose: () => clearInterval(timer) });
+  ctx.subscriptions.push(
+    vscode.window.onDidChangeWindowState((w) => {
+      if (w.focused && Date.now() - lastCheck > 15_000) void refreshSignedIn();
+    }),
+  );
 }
 
 // ---------- commands ----------
@@ -217,7 +429,7 @@ function candidateFolders(): string[] {
     return [];
   }
   return names
-    .filter((n) => n.startsWith('.claude-') && !['.claude-shared-profiles', '.claude-mem'].includes(n) && !n.startsWith('.claude-manager'))
+    .filter((n) => n.startsWith('.claude-') && !['.claude-shared-profiles', '.claude-multi-account', '.claude-mem'].includes(n) && !n.startsWith('.claude-manager'))
     .map((n) => path.join(home, n))
     .filter((p) => {
       try {
@@ -272,7 +484,7 @@ async function cmdAdoptFolder(preset?: string, presetName?: string): Promise<voi
     {
       modal: true,
       detail:
-        `Its history, projects, memory, skills and settings move into ~/.claude, so every account sees them. A copy (${mb(size)}, plugin caches excluded) goes to ~/.claude-shared-profiles first, and "Undo an adoption" reverses every step.\n\n` +
+        `Its history, projects, memory, skills and settings move into ~/.claude, so every account sees them. A copy (${mb(size)}, plugin caches excluded) goes to ~/${path.relative(home, supportDir(home))} first, and "Undo an adoption" reverses every step.\n\n` +
         `Its login and account files stay where they are and are never read.\n\nWhere both folders have a different file with the same name, the copy in ~/.claude stays in use and this folder's copy is saved with the backup. Close Claude Code sessions that use this folder before continuing.`,
     },
     'Adopt',
@@ -317,7 +529,7 @@ async function cmdUndo(): Promise<void> {
   try {
     const problems = undo(home, pick.run.dir);
     const dir = accountsDirFromRun(pick.run.dir);
-    if (dir && pick.run.name.includes('-adopt-')) fs.rmSync(path.join(dir, '.shared-profiles.json'), { force: true });
+    if (dir && pick.run.name.includes('-adopt-')) clearSetUp(dir);
     for (const p of problems) log.appendLine(`[undo] ${p}`);
     if (problems.length) {
       log.show();
@@ -380,7 +592,7 @@ async function cmdDoctor(): Promise<void> {
     unsharedProjectKeys: unsharedKeys(),
   });
   if (!bin) findings.unshift({ level: 'warn', message: 'Could not find the claude CLI, so sign-in state was not checked.' });
-  if (!list.length) findings.unshift({ level: 'info', message: 'No accounts set up yet. Run "Shared Profiles: Add account" or "Adopt an existing config folder".' });
+  if (!list.length) findings.unshift({ level: 'info', message: 'No accounts set up yet. Run "Claude Multi-Account: Add account" or "Adopt an existing config folder".' });
   const icon = { ok: '✓', info: 'i', warn: '!', error: '✗' } as const;
   log.appendLine(`--- Doctor ${new Date().toLocaleString()} (this window: ${active?.name ?? 'none'}, CLAUDE_CONFIG_DIR=${process.env.CLAUDE_CONFIG_DIR ?? 'unset'})`);
   for (const f of findings) log.appendLine(`${icon[f.level]} ${f.message}`);
@@ -494,9 +706,9 @@ export function activate(context: vscode.ExtensionContext): void {
   active = chosenAccount();
   if (active) applyEnv(active);
 
-  log = vscode.window.createOutputChannel('Shared Profiles');
+  log = vscode.window.createOutputChannel('Claude Code Multi-Account');
   context.subscriptions.push(log);
-  log.appendLine(`Window account: ${active?.name ?? 'none'} (CLAUDE_CONFIG_DIR ${process.env.CLAUDE_CONFIG_DIR ?? 'unset'})`);
+  log.appendLine(`Window account: ${active?.name ?? 'none'}${chosenBecause ? ` (${chosenBecause})` : ''}; CLAUDE_CONFIG_DIR ${process.env.CLAUDE_CONFIG_DIR ?? 'unset'}`);
 
   if (active) {
     const dir = accountDir(active, home);
@@ -505,22 +717,30 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  status.command = 'sharedProfiles.switch';
+  status.command = 'claudeMultiAccount.switch';
   context.subscriptions.push(status);
   renderStatus();
 
   const reg = (id: string, fn: () => Promise<void>) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
-  reg('sharedProfiles.switch', cmdSwitch);
-  reg('sharedProfiles.addAccount', cmdAddAccount);
-  reg('sharedProfiles.adoptFolder', () => cmdAdoptFolder());
-  reg('sharedProfiles.undoAdoption', cmdUndo);
-  reg('sharedProfiles.repair', cmdRepair);
-  reg('sharedProfiles.doctor', cmdDoctor);
-  reg('sharedProfiles.syncMcp', cmdSyncMcp);
+  reg('claudeMultiAccount.switch', cmdSwitch);
+  reg('claudeMultiAccount.addAccount', cmdAddAccount);
+  reg('claudeMultiAccount.adoptFolder', () => cmdAdoptFolder());
+  reg('claudeMultiAccount.undoAdoption', cmdUndo);
+  reg('claudeMultiAccount.repair', cmdRepair);
+  reg('claudeMultiAccount.doctor', cmdDoctor);
+  reg('claudeMultiAccount.syncMcp', cmdSyncMcp);
+
+  panel = new PanelProvider(panelState, onPanelMessage);
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider('claudeMultiAccount.panel', panel));
+  const tick = setInterval(() => {
+    if (panel?.visible) void panel.refresh();
+  }, 30_000);
+  context.subscriptions.push({ dispose: () => clearInterval(tick) });
+  watchSkills();
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (!e.affectsConfiguration('sharedProfiles')) return;
+      if (!e.affectsConfiguration('claudeMultiAccount')) return;
       const next = chosenAccount();
       if (next?.name !== active?.name || accountDir(next ?? { name: '' }, home) !== accountDir(active ?? { name: '' }, home)) {
         void vscode.window
@@ -528,13 +748,26 @@ export function activate(context: vscode.ExtensionContext): void {
           .then((b) => b && vscode.commands.executeCommand('workbench.action.reloadWindow'));
       }
       renderStatus();
+      void panel?.refresh();
     }),
   );
 
   if (!active) void offerSetup();
-  else setTimeout(() => void refreshSignedIn(), 4000);
+  else {
+    setTimeout(() => void refreshSignedIn(), 4000);
+    watchSignIn();
+  }
 }
 
 export function deactivate(): void {
-  /* nothing to clean up: the variable lives only in this window's extension host */
+  // Runs when the window closes, reloads or opens another folder. Written synchronously so the
+  // next extension host in this window reads it on start (see chosenAccount).
+  const name = handoffName ?? active?.name;
+  if (!name) return;
+  try {
+    fs.mkdirSync(path.dirname(HANDOFF_FILE), { recursive: true });
+    fs.writeFileSync(HANDOFF_FILE, JSON.stringify({ name, at: Date.now() }));
+  } catch {
+    /* best effort */
+  }
 }

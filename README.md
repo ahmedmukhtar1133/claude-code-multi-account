@@ -1,8 +1,8 @@
-# Claude Code Shared Profiles
+# Claude Code Multi-Account: Shared History
 
 Use a different Claude account in each VS Code window, for example Work in one and Personal in another, while every account shares the same history, sessions, memory, `CLAUDE.md`, skills, agents, commands, hooks, plugins and settings. Only the login is separate.
 
-Works with the official Claude Code extension and CLI. Not affiliated with or endorsed by Anthropic.
+> **Unofficial.** This is an independent open-source extension. It is not made by, affiliated with, or endorsed by Anthropic. It works with the official Claude Code extension and CLI without changing them.
 
 - **Per window.** Each window shows its account in the status bar. Click it to switch.
 - **Shared by default.** A conversation started on Work shows up in Personal's resume list, and memory written on one account is read by the other.
@@ -10,7 +10,22 @@ Works with the official Claude Code extension and CLI. Not affiliated with or en
 - **No network calls, no telemetry.**
 - **Doesn't modify Claude Code** in any way.
 
+![A VS Code window switching from the Personal account to Work: click the account in the status bar, pick Work, reload. The same sessions stay in the sidebar.](media/readme/switch.gif)
+
+## Open source and safe to use
+
+All of the code is public at [github.com/ahmedmukhtar1133/claude-code-multi-account](https://github.com/ahmedmukhtar1133/claude-code-multi-account) under the MIT license, so anyone can read exactly what it does before installing it. In short:
+
+- It never sees your password or your Claude login. You sign in inside Claude Code, between you and Anthropic.
+- It never connects to the internet. Nothing about you or your code leaves your computer.
+- It never deletes your files. When it moves something, it keeps a backup and can undo the move.
+- It doesn't change Claude Code. It only tells each window which account folder to use.
+
+If you're new to this, the Doctor command checks your setup and explains anything that looks wrong in plain words.
+
 ## How it works
+
+![Two VS Code windows side by side, Personal on the left and Work on the right. A session started in the Personal window appears at the top of the Work window's session list.](media/readme/shared.gif)
 
 Claude Code reads its configuration folder from the `CLAUDE_CONFIG_DIR` environment variable when it starts ([Anthropic's docs on multiple accounts](https://code.claude.com/docs/en/authentication)). Each VS Code window has its own extension host, and the Claude Code extension passes that host's environment on to Claude. This extension starts first in every window and sets the variable for the window and its terminals.
 
@@ -30,8 +45,10 @@ Anything Claude Code adds in future versions stays per account until this extens
 
 ## Getting started
 
+![Adding an account from the side panel: name it Client, copy the MCP servers, switch and reload, then sign in once in Claude Code.](media/readme/add.gif)
+
 1. Install the extension. If you already have a second config folder (for example `~/.claude-work`), it offers to adopt it.
-2. Or run **Shared Profiles: Add account**. It asks for a name for your current account, then for the new one, creates the folder with its links, and reloads the window on the new account.
+2. Or run **Claude Multi-Account: Add account**. It asks for a name for your current account, then for the new one, creates the folder with its links, and reloads the window on the new account.
 3. Sign in through the Claude Code panel. Sign-in happens in Claude Code, between you and Anthropic.
 
 ### Adopting an existing folder
@@ -39,8 +56,8 @@ Anything Claude Code adds in future versions stays per account until this extens
 Adopting merges another account's folder into the shared store:
 - History is appended.
 - Sessions and memory folders are merged.
-- Where both folders have a different file with the same name (for example `settings.json`), the store's copy stays in use. The other copy goes to the run's `kept/` folder in `~/.claude-shared-profiles/runs/`, outside `~/.claude`, so Claude Code never loads it as an extra agent, command or skill.
-- Nothing is deleted. First, a copy of the folder's shareable data (plugin caches excluded) goes to `~/.claude-shared-profiles/runs/`.
+- Where both folders have a different file with the same name (for example `settings.json`), the store's copy stays in use. The other copy goes to the run's `kept/` folder in `~/.claude-multi-account/runs/`, outside `~/.claude`, so Claude Code never loads it as an extra agent, command or skill.
+- Nothing is deleted. First, a copy of the folder's shareable data (plugin caches excluded) goes to `~/.claude-multi-account/runs/`.
 - Every step is journaled, and **Undo an adoption** reverses it. History written since the adoption is kept.
 
 ## Settings
@@ -48,17 +65,29 @@ Adopting merges another account's folder into the shared store:
 The settings sync with Settings Sync, and folders are relative to your home folder, so one configuration works on every machine.
 
 ```jsonc
-"sharedProfiles.accounts": [
+"claudeMultiAccount.accounts": [
   { "name": "Personal", "folder": null },          // ~/.claude
   { "name": "Work", "folder": ".claude-work" }
 ],
-"sharedProfiles.defaultAccount": "Personal",        // for windows that never chose one
-"sharedProfiles.unsharedProjects": ["~/clients/nda-repo"]  // history kept per account
+"claudeMultiAccount.defaultAccount": "Personal",        // for windows that never chose one
+"claudeMultiAccount.unsharedProjects": ["~/clients/nda-repo"]  // history kept per account
 ```
 
 On a new machine the synced settings are enough: empty or missing account folders are created and linked automatically, and you sign in once per account. A folder that already holds its own data is never linked without asking; you get an adoption prompt instead.
 
 `unsharedProjects` keeps the listed projects' sessions and memory separate in every non-default account. The default account's sessions for those projects stay in `~/.claude` as usual.
+
+## Side panel
+
+The Multi-Account icon in the Activity Bar opens a panel with:
+
+- **This window:** its account, whether it's signed in, and a Switch button.
+- **Recent sessions in this project** (collapsed): the latest sessions by title, with an Active badge on any still running. Click one to open it in Claude Code.
+- **Accounts:** every account with a Switch link, a button to copy MCP servers from another account, and Add account.
+- **Health:** what the Doctor found, with Repair links or a link to any other account switcher that's installed.
+- **Shared by all accounts:** how many projects, sessions, skills, agents and commands every account sees.
+
+A new skill is shared with the other accounts within a few seconds; agents, commands, hooks, `CLAUDE.md` and settings are shared instantly.
 
 ## Commands
 
@@ -82,6 +111,7 @@ On a new machine the synced settings are enough: empty or missing account folder
 ## Notes and limits
 
 - **Switching needs a window reload.** Claude Code reads the variable when it starts.
+- **The account is remembered per folder.** A folder you haven't chosen an account for follows the window it opens in: opening another folder in a Work window, or from a Work empty window, keeps Work. Once you pick an account for a folder, that folder keeps it.
 - **Two windows on different accounts write to the same history.** This is the same situation as two windows on one account, which Claude Code already handles: sessions are separate files, and the prompt history is append-only.
 - **Usage limits stay per account.** This extension doesn't show or combine them, because reading them would mean using your login token. Use `/usage` in Claude Code.
 - **Windows:** folders use junctions. Files use symlinks when Developer Mode is on, otherwise hard links. A save can split a hard link into a separate copy; the startup repair spots that and keeps the newer copy.
@@ -102,9 +132,15 @@ npm run package   # builds the .vsix (needs @vscode/vsce)
 
 Press F5 in VS Code to run the extension in a development window.
 
+The README GIFs are drawn in code and recorded frame by frame, with made-up sample data: `npm run compile`, `node docs/gif/panels.js`, then `node docs/gif/record.mjs switch 9`, `shared 9` and `add 12`. Recording needs Google Chrome, ffmpeg and `playwright-core` (set `PLAYWRIGHT_CORE` to its `index.mjs`).
+
 ## Built by Deskworthy
 
-Claude Code Shared Profiles is built and maintained by [Deskworthy](https://deskworthy.app?ref=github&utm_campaign=claude-code-shared-profiles), a small studio making fast, focused desktop apps for the Mac. We use it every day to keep work and personal accounts apart without losing context. If it helps you too, have a look at what we make.
+Claude Code Multi-Account is built and maintained by [Deskworthy](https://deskworthy.app?ref=github&utm_campaign=claude-code-multi-account), a small studio making fast, focused desktop apps for the Mac. We use it every day to keep work and personal accounts apart without losing context. If it helps you too, have a look at what we make.
+
+## Trademarks
+
+Claude and Claude Code are trademarks of Anthropic, PBC. They are used here only to say what this extension works with.
 
 ## License
 

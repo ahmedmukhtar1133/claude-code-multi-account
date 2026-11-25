@@ -1,14 +1,14 @@
 {
-  "name": "claude-code-shared-profiles",
-  "displayName": "Claude Code Shared Profiles",
-  "description": "Use a different account in each VS Code window while every account shares the same history, memory, skills and settings. Works with Claude Code. Never reads login data, makes no network calls.",
+  "name": "claude-code-multi-account",
+  "displayName": "Claude Code Multi-Account: Shared History",
+  "description": "A different Claude account in each VS Code window, with one shared history, memory, skills and settings. Unofficial, not affiliated with Anthropic. Never reads login data, makes no network calls.",
   "version": "0.1.0",
   "publisher": "deskworthy",
   "license": "MIT",
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ahmedmukhtar1133/claude-code-shared-profiles"
+    "url": "https://github.com/ahmedmukhtar1133/claude-code-multi-account"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -19,8 +19,9 @@
   "keywords": [
     "claude-code",
     "multiple accounts",
+    "multi-account",
     "account switcher",
-    "profiles",
+    "shared history",
     "CLAUDE_CONFIG_DIR"
   ],
   "extensionKind": [
@@ -31,47 +32,65 @@
   ],
   "main": "./out/src/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudeMultiAccount",
+          "title": "Claude Code Multi-Account",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "claudeMultiAccount": [
+        {
+          "type": "webview",
+          "id": "claudeMultiAccount.panel",
+          "name": "Claude Code Multi-Account"
+        }
+      ]
+    },
     "commands": [
       {
-        "command": "sharedProfiles.switch",
+        "command": "claudeMultiAccount.switch",
         "title": "Switch account",
-        "category": "Shared Profiles"
+        "category": "Claude Multi-Account"
       },
       {
-        "command": "sharedProfiles.addAccount",
+        "command": "claudeMultiAccount.addAccount",
         "title": "Add account",
-        "category": "Shared Profiles"
+        "category": "Claude Multi-Account"
       },
       {
-        "command": "sharedProfiles.adoptFolder",
+        "command": "claudeMultiAccount.adoptFolder",
         "title": "Adopt an existing config folder",
-        "category": "Shared Profiles"
+        "category": "Claude Multi-Account"
       },
       {
-        "command": "sharedProfiles.undoAdoption",
+        "command": "claudeMultiAccount.undoAdoption",
         "title": "Undo an adoption",
-        "category": "Shared Profiles"
+        "category": "Claude Multi-Account"
       },
       {
-        "command": "sharedProfiles.repair",
+        "command": "claudeMultiAccount.repair",
         "title": "Repair links",
-        "category": "Shared Profiles"
+        "category": "Claude Multi-Account"
       },
       {
-        "command": "sharedProfiles.doctor",
+        "command": "claudeMultiAccount.doctor",
         "title": "Doctor",
-        "category": "Shared Profiles"
+        "category": "Claude Multi-Account"
       },
       {
-        "command": "sharedProfiles.syncMcp",
+        "command": "claudeMultiAccount.syncMcp",
         "title": "Copy MCP servers between accounts",
-        "category": "Shared Profiles"
+        "category": "Claude Multi-Account"
       }
     ],
     "configuration": {
-      "title": "Shared Profiles",
+      "title": "Claude Code Multi-Account",
       "properties": {
-        "sharedProfiles.accounts": {
+        "claudeMultiAccount.accounts": {
           "type": "array",
           "scope": "application",
           "default": [],
@@ -96,13 +115,13 @@
             }
           }
         },
-        "sharedProfiles.defaultAccount": {
+        "claudeMultiAccount.defaultAccount": {
           "type": "string",
           "scope": "application",
           "default": "",
           "description": "Account used by windows that have no account chosen yet. Empty means the default account (~/.claude)."
         },
-        "sharedProfiles.unsharedProjects": {
+        "claudeMultiAccount.unsharedProjects": {
           "type": "array",
           "scope": "application",
           "default": [],

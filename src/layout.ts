@@ -67,6 +67,7 @@ const PER_ACCOUNT_PATTERNS: readonly RegExp[] = [
   /^\.claude.*\.json/,
   /\.from-.+/,
   /^\.shared-profiles/,
+  /^\.multi-account/,
 ];
 
 export type Kind = 'shared' | 'mixed' | 'account' | 'never' | 'unknown';

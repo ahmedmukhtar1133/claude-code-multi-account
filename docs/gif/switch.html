@@ -1,0 +1,90 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Switch scene</title>
+<link rel="stylesheet" href="scene.css"></head>
+<body>
+<div class="win">
+  <div class="title"><span class="tl" style="background:#FF5F57"></span><span class="tl" style="background:#FEBC2E"></span><span class="tl" style="background:#28C840"></span><span class="t">checkout-service</span></div>
+  <div class="mid">
+    <div class="abar">
+      <div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg></div>
+      <div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg></div>
+      <div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 8v8M18 11c0 4-6 3-10 6"/></svg></div>
+      <div class="i on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3.5" width="12" height="12" rx="3"/><rect x="9" y="8.5" width="12" height="12" rx="3"/></svg></div>
+    </div>
+    <div class="sidebar"><div class="h">Claude Code Multi-Account</div>
+      <div class="frames"><iframe id="pPersonal" src="build/panel-personal.html"></iframe><iframe id="pWork" src="build/panel-work.html" style="visibility:hidden"></iframe></div></div>
+    <div class="editor">
+      <div class="tabs"><div class="tab on">checkout.test.ts</div><div class="tab">billing.ts</div></div>
+      <div class="code"><span class="n">1</span><span class="k">import</span> { <span class="v">checkout</span> } <span class="k">from</span> <span class="s">'./checkout'</span>;
+<span class="n">2</span>
+<span class="n">3</span><span class="f">describe</span>(<span class="s">'checkout'</span>, () => {
+<span class="n">4</span>  <span class="f">it</span>(<span class="s">'charges the card once'</span>, <span class="k">async</span> () => {
+<span class="n">5</span>    <span class="k">const</span> <span class="v">order</span> = <span class="k">await</span> <span class="f">checkout</span>(<span class="v">cart</span>);
+<span class="n">6</span>    <span class="f">expect</span>(<span class="v">order</span>.<span class="v">charges</span>).<span class="f">toHaveLength</span>(<span class="s">1</span>);
+<span class="n">7</span>  });
+<span class="n">8</span>
+<span class="n">9</span>  <span class="c">// retries used to double-charge under load</span>
+<span class="n">10</span>  <span class="f">it</span>(<span class="s">'is safe to retry'</span>, <span class="k">async</span> () => {
+<span class="n">11</span>    <span class="k">await</span> <span class="f">checkout</span>(<span class="v">cart</span>, { <span class="v">idempotencyKey</span>: <span class="s">'k1'</span> });
+<span class="n">12</span>  });
+<span class="n">13</span>});</div>
+    </div>
+    <div class="chat">
+      <div class="head"><span>Claude Code</span><span class="who" id="who">you@personal.dev</span></div>
+      <div class="msgs"><div class="bubble">Fix the flaky checkout test</div>
+        <div class="reply">The retry path charges twice when the first request times out. I added an idempotency key and a test for it. <span class="mut">2 files changed</span></div></div>
+      <div class="input">Ask Claude to edit your code…</div>
+    </div>
+  </div>
+  <div class="status"><div class="it" id="acct"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="5.5" r="2.8"/><path d="M2.5 14c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5"/></svg><span id="acctName">Personal</span></div>
+    <div class="it">main</div><div class="sp"></div><div class="it">Ln 11, Col 52</div><div class="it">TypeScript</div></div>
+</div>
+<div class="qp" id="qp"><div class="ph">Claude account for this window</div>
+  <div class="row" id="qPersonal"><span>✓ Personal</span><span class="d">~/.claude (default)</span></div>
+  <div class="row" id="qWork"><span>Work</span><span class="d">~/.claude-work</span></div>
+  <div class="sep"></div><div class="row"><span>+ Add account…</span></div><div class="row"><span>Adopt an existing config folder…</span></div></div>
+<div class="note" id="note">Reload this window to use "Work"? Claude Code reads the account when it starts.<div class="btns"><span class="btn" id="reload">Reload</span></div></div>
+<div class="fade" id="fade"></div>
+<div class="ring" id="ring"></div>
+<svg class="cursor" id="cursor" viewBox="0 0 24 24"><path d="M4 2l15 11-6.5 1.2L16 21l-3 1.4-3.5-7L4 19z" fill="#FFFFFF" stroke="#000000" stroke-width="1.2" stroke-linejoin="round"/></svg>
+<div class="cap" id="cap"><span class="num" id="capn">1</span><span id="capt"></span></div>
+<script>
+const $ = (id) => document.getElementById(id);
+// Cursor path: [time, x, y]; positions in page pixels.
+const path = [[0, 700, 420], [0.8, 700, 420], [1.6, 72, 708], [2.0, 72, 708], [2.7, 560, 111], [3.2, 560, 111], [3.9, 1137, 663], [4.4, 1137, 663], [5.6, 1137, 663], [6.6, 160, 312], [11, 160, 312]];
+const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+function at(t) {
+  for (let i = 1; i < path.length; i++) {
+    const [t1, x1, y1] = path[i], [t0, x0, y0] = path[i - 1];
+    if (t <= t1) { const k = t1 === t0 ? 1 : ease((t - t0) / (t1 - t0)); return [x0 + (x1 - x0) * k, y0 + (y1 - y0) * k]; }
+  }
+  const l = path[path.length - 1]; return [l[1], l[2]];
+}
+const clicks = [1.8, 3.0, 4.5];
+const caps = [[0, 1, 'This window uses your Personal account'], [1.6, 2, 'Click the account in the status bar'], [2.6, 3, 'Pick Work, then reload the window'], [5.4, 4, 'Same project, same history, now on Work']];
+window.render = (t) => {
+  const [x, y] = at(t);
+  $('cursor').style.transform = `translate(${x - 4}px, ${y - 2}px)`;
+  const c = clicks.find((c) => t >= c && t < c + 0.35);
+  $('ring').style.opacity = c !== undefined ? String(1 - (t - c) / 0.35) : '0';
+  $('ring').style.transform = `translate(${x - 15}px, ${y - 15}px) scale(${c !== undefined ? 0.6 + (t - c) * 1.6 : 1})`;
+  const work = t >= 5.1;
+  $('acctName').textContent = work ? 'Work' : 'Personal';
+  $('acct').classList.toggle('hot', t >= 1.4 && t < 3.0);
+  $('who').textContent = work ? 'you@company.com' : 'you@personal.dev';
+  $('pPersonal').style.visibility = work ? 'hidden' : 'visible';
+  $('pWork').style.visibility = work ? 'visible' : 'hidden';
+  $('qp').style.display = t >= 1.85 && t < 3.05 ? 'block' : 'none';
+  $('qWork').classList.toggle('sel', t >= 2.5);
+  $('qPersonal').classList.toggle('sel', t < 2.5);
+  $('note').style.display = t >= 3.2 && t < 4.6 ? 'block' : 'none';
+  $('reload').classList.toggle('hot', t >= 4.0);
+  const f = t < 4.6 ? 0 : t < 4.85 ? (t - 4.6) / 0.25 : t < 5.1 ? 1 : t < 5.45 ? 1 - (t - 5.1) / 0.35 : 0;
+  $('fade').style.opacity = String(f);
+  const cap = [...caps].reverse().find((k) => t >= k[0]);
+  $('capn').textContent = cap[1];
+  $('capt').textContent = cap[2];
+};
+render(0);
+</script>
+</body></html>

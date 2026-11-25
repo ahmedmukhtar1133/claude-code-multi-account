@@ -176,7 +176,9 @@ export function listRuns(home: string): { dir: string; name: string; undone: boo
     .map((n) => ({ dir: path.join(root, n), name: n, undone: fs.existsSync(path.join(root, n, 'undone')) }));
 }
 
-const MARKER = '.shared-profiles.json';
+const MARKER = '.multi-account.json';
+/** Marker name used before the rename; still recognised. */
+const LEGACY_MARKER = '.shared-profiles.json';
 
 /** Marks an account folder as managed, so repairs run on it without asking. */
 export function markSetUp(accountRoot: string, how: 'adopted' | 'created'): void {
@@ -184,7 +186,11 @@ export function markSetUp(accountRoot: string, how: 'adopted' | 'created'): void
 }
 
 export function isSetUp(accountRoot: string): boolean {
-  return fs.existsSync(path.join(accountRoot, MARKER));
+  return fs.existsSync(path.join(accountRoot, MARKER)) || fs.existsSync(path.join(accountRoot, LEGACY_MARKER));
+}
+
+export function clearSetUp(accountRoot: string): void {
+  for (const m of [MARKER, LEGACY_MARKER]) fs.rmSync(path.join(accountRoot, m), { force: true });
 }
 
 /** A folder that is missing, empty, or holds only links: safe to link without an adoption. */

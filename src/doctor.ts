@@ -11,7 +11,17 @@ export interface Finding {
   message: string;
   /** Command id that fixes it, when there is one. */
   fix?: string;
+  /** Extension ids the finding is about (other account switchers). */
+  extensions?: string[];
 }
+
+/** Other extensions that set CLAUDE_CONFIG_DIR or swap logins. */
+export const OTHER_SWITCHERS: Readonly<Record<string, string>> = {
+  'vishalguptax.claude-manager': 'Claude Code Manager',
+  'wheatlay.switchboard-for-claude-code': 'Switchboard for Claude Code',
+  'leog.claude-code-config-dir-patcher': 'Claude Code Profiles (leog)',
+  'kahuecosta.account-switcher-for-claude-code': 'Multi-Account Switcher for Claude Code',
+};
 
 export interface DoctorInput {
   home: string;
@@ -89,15 +99,20 @@ export function runDoctor(input: DoctorInput): Finding[] {
   if (fs.existsSync(path.join(store, 'manager-accounts'))) {
     out.push({ level: 'warn', message: `${path.join(store, 'manager-accounts')} exists. Claude Code Manager keeps copies of login tokens there in plain text. This extension never reads it; consider deleting it once you no longer use that switcher.` });
   }
-  const switchers = (input.extensions ?? []).filter((id) =>
-    ['vishalguptax.claude-manager', 'wheatlay.switchboard-for-claude-code', 'leog.claude-code-config-dir-patcher', 'kahuecosta.account-switcher-for-claude-code'].includes(id.toLowerCase()),
-  );
+  const switchers = (input.extensions ?? []).filter((id) => id.toLowerCase() in OTHER_SWITCHERS);
   if (switchers.length) {
-    out.push({ level: 'warn', message: `Other account switchers are installed (${switchers.join(', ')}). Two switchers setting CLAUDE_CONFIG_DIR fight over it; disable the others' switching.` });
+    const names = switchers.map((id) => OTHER_SWITCHERS[id.toLowerCase()]).join(', ');
+    out.push({
+      level: 'warn',
+      message: `Another account switcher is installed: ${names}. Two switchers fight over the account. Disable it, or turn off its account switching.`,
+      extensions: switchers,
+    });
   }
 
   if (!out.some((f) => f.level === 'error' || f.level === 'warn')) out.push({ level: 'ok', message: 'Everything is linked and nothing overrides the per-window account.' });
-  return out;
+  // Show paths inside the home folder as ~/..., which is shorter and doesn't print the user name.
+  const homePrefix = input.home.endsWith(path.sep) ? input.home : input.home + path.sep;
+  return out.map((f) => ({ ...f, message: f.message.split(homePrefix).join('~/') }));
 }
 
 function checkAccount(a: Account, home: string, platform: Platform, unshared: ReadonlySet<string>): Finding[] {
@@ -105,7 +120,7 @@ function checkAccount(a: Account, home: string, platform: Platform, unshared: Re
   const dir = accountDir(a, home);
   const store = storeDir(home);
   if (!fs.existsSync(dir)) {
-    out.push({ level: 'error', message: `"${a.name}": folder ${dir} is missing.`, fix: 'sharedProfiles.repair' });
+    out.push({ level: 'error', message: `"${a.name}": folder ${dir} is missing.`, fix: 'claudeMultiAccount.repair' });
     return out;
   }
   const broken: string[] = [];
@@ -133,7 +148,7 @@ function checkAccount(a: Account, home: string, platform: Platform, unshared: Re
   }
   if (broken.length) {
     const hint = platform === 'win32' && broken.some((b) => SHARED_FILES.has(b)) ? ' On Windows a save can turn a linked file into a separate copy; Repair keeps the newer one.' : '';
-    out.push({ level: 'warn', message: `"${a.name}": not shared yet: ${broken.slice(0, 8).join(', ')}${broken.length > 8 ? ` and ${broken.length - 8} more` : ''}.${hint}`, fix: 'sharedProfiles.repair' });
+    out.push({ level: 'warn', message: `"${a.name}": not shared yet: ${broken.slice(0, 8).join(', ')}${broken.length > 8 ? ` and ${broken.length - 8} more` : ''}.${hint}`, fix: 'claudeMultiAccount.repair' });
   }
   const unknown = fs.readdirSync(dir).filter((n) => classify(n) === 'unknown');
   if (unknown.length) {

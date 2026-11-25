@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 
 export interface Account {
@@ -23,7 +24,11 @@ export function accountDir(a: Account, home: string): string {
 }
 
 /** Folder for this extension's own data: lock, backups and adoption journals. Outside ~/.claude on purpose. */
-export const supportDir = (home: string): string => path.join(home, '.claude-shared-profiles');
+export function supportDir(home: string): string {
+  // Installs from before the rename keep their folder, so existing undo journals stay valid.
+  const legacy = path.join(home, '.claude-shared-profiles');
+  return fs.existsSync(legacy) ? legacy : path.join(home, '.claude-multi-account');
+}
 
 export function slug(name: string): string {
   const s = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');

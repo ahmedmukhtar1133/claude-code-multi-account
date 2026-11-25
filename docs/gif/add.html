@@ -1,0 +1,128 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Add account scene</title>
+<link rel="stylesheet" href="scene.css">
+<style>
+/* README GIF "add an account": side panel button, name, copy MCP servers, switch, sign in. render(t) draws frame t (seconds). */
+.input-box { position: absolute; left: 340px; top: 40px; width: 520px; background: #222222; border: 1px solid #3C3C3C; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.5); padding: 8px; display: none; }
+.input-box .lbl { color: var(--mut); padding: 2px 4px 6px; }
+.input-box .field { border: 1px solid var(--blue); border-radius: 3px; padding: 6px 8px; color: #E0E0E0; min-height: 30px; }
+.caret { display: inline-block; width: 1px; height: 15px; background: #E0E0E0; vertical-align: -3px; margin-left: 1px; }
+.qp .row .box { width: 14px; height: 14px; border: 1px solid #6E7681; border-radius: 3px; display: inline-grid; place-items: center; font-size: 11px; line-height: 1; background: var(--blue); border-color: var(--blue); color: #FFFFFF; }
+.qp .ok { display: flex; justify-content: flex-end; padding: 6px 4px 2px; }
+.qp .ok span { background: var(--blue); color: #FFFFFF; border-radius: 2px; padding: 4px 14px; }
+.note .btns { gap: 8px; }
+.note .btn.sec { background: #313131; color: var(--fg); }
+.signin { display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 24px; color: var(--fg); }
+.signin .h { font-size: 16px; color: #FFFFFF; font-weight: 600; }
+.signin .btn { background: var(--blue); color: #FFFFFF; border-radius: 3px; padding: 6px 22px; }
+.signin .btn.hot { background: #026EC1; }
+.signin .mut { color: var(--mut); max-width: 260px; line-height: 1.5; }
+.warn { color: #CCA700; }
+</style></head>
+<body>
+<div class="win">
+  <div class="title"><span class="tl" style="background:#FF5F57"></span><span class="tl" style="background:#FEBC2E"></span><span class="tl" style="background:#28C840"></span><span class="t">client-portal</span></div>
+  <div class="mid">
+    <div class="abar">
+      <div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg></div>
+      <div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg></div>
+      <div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 8v8M18 11c0 4-6 3-10 6"/></svg></div>
+      <div class="i on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3.5" width="12" height="12" rx="3"/><rect x="9" y="8.5" width="12" height="12" rx="3"/></svg></div>
+    </div>
+    <div class="sidebar"><div class="h">Claude Code Multi-Account</div>
+      <div class="frames"><iframe id="pBefore" src="build/panel-personal.html"></iframe><iframe id="pAfter" src="build/panel-client.html" style="visibility:hidden"></iframe></div></div>
+    <div class="editor">
+      <div class="tabs"><div class="tab on">invoice.ts</div></div>
+      <div class="code"><span class="n">1</span><span class="k">export</span> <span class="k">function</span> <span class="f">invoiceTotal</span>(<span class="v">lines</span>: <span class="v">Line</span>[]) {
+<span class="n">2</span>  <span class="k">return</span> <span class="v">lines</span>.<span class="f">reduce</span>((<span class="v">sum</span>, <span class="v">l</span>) => <span class="v">sum</span> + <span class="v">l</span>.<span class="v">qty</span> * <span class="v">l</span>.<span class="v">price</span>, <span class="s">0</span>);
+<span class="n">3</span>}
+<span class="n">4</span>
+<span class="n">5</span><span class="c">// client asked for VAT per line</span>
+<span class="n">6</span><span class="k">export</span> <span class="k">const</span> <span class="v">VAT</span> = <span class="s">0.2</span>;</div>
+    </div>
+    <div class="chat">
+      <div class="head"><span>Claude Code</span><span class="who" id="who">you@personal.dev</span></div>
+      <div class="msgs" id="msgs"><div class="bubble">Add VAT per invoice line</div>
+        <div class="reply">Added a <span class="mut">vat</span> field to each line and a test that checks the totals.</div></div>
+      <div class="signin" id="signin"><div class="h">Sign in to Claude Code</div><div class="mut">This account is new. Sign in once; its history, memory and skills are already here.</div><span class="btn" id="signBtn">Sign in</span></div>
+      <div class="input" id="chatInput">Ask Claude to edit your code…</div>
+    </div>
+  </div>
+  <div class="status"><div class="it"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="5.5" r="2.8"/><path d="M2.5 14c.6-3 2.8-4.5 5.5-4.5s4.9 1.5 5.5 4.5"/></svg><span id="acctName">Personal</span></div>
+    <div class="it">main</div><div class="sp"></div><div class="it">TypeScript</div></div>
+</div>
+<div class="input-box" id="nameBox"><div class="lbl">Name for the new account</div><div class="field" id="nameField"></div></div>
+<div class="note" id="note1">"Client" is ready and shares history, memory, skills and settings. Copy the MCP servers of "Personal" to it?<div class="btns"><span class="btn" id="copyBtn">Copy MCP servers</span><span class="btn sec">Skip</span></div></div>
+<div class="qp" id="mcp"><div class="ph">MCP servers to add to "Client"</div>
+  <div class="row sel"><span class="box">✓</span><span>github</span><span class="d">npx @modelcontextprotocol/server-github (env: GITHUB_TOKEN)</span></div>
+  <div class="row"><span class="box">✓</span><span>postgres</span><span class="d">npx @modelcontextprotocol/server-postgres</span></div>
+  <div class="ok"><span id="okBtn">OK</span></div></div>
+<div class="note" id="note2">Switch this window to "Client"? After the reload, sign in through the Claude Code panel. Sign-in goes through Anthropic; this extension never sees it.<div class="btns"><span class="btn" id="switchBtn">Switch and reload</span></div></div>
+<div class="fade" id="fade"></div>
+<div class="ring" id="ring"></div>
+<svg class="cursor" id="cursor" viewBox="0 0 24 24"><path d="M4 2l15 11-6.5 1.2L16 21l-3 1.4-3.5-7L4 19z" fill="#FFFFFF" stroke="#000000" stroke-width="1.2" stroke-linejoin="round"/></svg>
+<div class="cap"><span class="num" id="capn">1</span><span id="capt"></span></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const center = (el) => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+let addXY = [200, 230], copyXY = [900, 640], okXY = [820, 150], switchXY = [1100, 640], signXY = [1020, 330];
+const path = () => [[0, 700, 420], [0.4, 700, 420], [1.2, ...addXY], [3.0, ...addXY], [3.8, ...copyXY], [4.6, ...copyXY], [5.4, ...okXY], [6.2, ...okXY], [6.9, ...switchXY], [8.6, ...switchXY], [9.4, ...signXY], [13, ...signXY]];
+const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+function at(t) {
+  const p = path();
+  for (let i = 1; i < p.length; i++) {
+    const [t1, x1, y1] = p[i], [t0, x0, y0] = p[i - 1];
+    if (t <= t1) { const k = t1 === t0 ? 1 : ease((t - t0) / (t1 - t0)); return [x0 + (x1 - x0) * k, y0 + (y1 - y0) * k]; }
+  }
+  const l = p[p.length - 1]; return [l[1], l[2]];
+}
+const shown = (el, on, disp = 'block') => { el.style.display = on ? disp : 'none'; };
+window.addEventListener('load', () => {
+  // Real positions of the buttons, measured once everything is laid out.
+  // The panel lives in an iframe that a file:// page can't read into, so its button position is fixed here.
+  addXY = [117, 223];
+  try {
+    const f = $('pBefore'); const fr = f.getBoundingClientRect();
+    const add = f.contentDocument && f.contentDocument.querySelector('[data-cmd=add]');
+    if (add) { const r = add.getBoundingClientRect(); addXY = [fr.left + r.left + r.width / 2, fr.top + r.top + r.height / 2]; }
+  } catch (e) { /* keep the fixed position */ }
+  for (const [id, set] of [['note1', () => (copyXY = center($('copyBtn')))], ['mcp', () => (okXY = center($('okBtn')))], ['note2', () => (switchXY = center($('switchBtn')))]]) {
+    $(id).style.display = 'block'; set(); $(id).style.display = 'none';
+  }
+  $('signin').style.display = 'flex'; $('msgs').style.display = 'none'; $('chatInput').style.display = 'none';
+  signXY = center($('signBtn'));
+  $('signin').style.display = 'none'; $('msgs').style.display = 'flex'; $('chatInput').style.display = 'block';
+});
+const clicks = [1.3, 2.75, 3.9, 5.5, 7.0, 9.5];
+const caps = [[0, 1, 'Add an account from the side panel'], [1.4, 2, 'Name it: it shares everything straight away'], [3.8, 3, 'Copy your MCP servers if you want them'], [6.2, 4, 'Switch to it and reload'], [7.9, 5, 'Sign in once in Claude Code. Your history is already there']];
+window.render = (t) => {
+  const [x, y] = at(t);
+  $('cursor').style.transform = `translate(${x - 4}px, ${y - 2}px)`;
+  const c = clicks.find((c) => t >= c && t < c + 0.35);
+  $('ring').style.opacity = c !== undefined ? String(1 - (t - c) / 0.35) : '0';
+  $('ring').style.transform = `translate(${x - 15}px, ${y - 15}px) scale(${c !== undefined ? 0.6 + (t - c) * 1.6 : 1})`;
+  const name = 'Client';
+  shown($('nameBox'), t >= 1.4 && t < 2.8);
+  const n = Math.min(name.length, Math.max(0, Math.floor((t - 1.6) / 0.8 * name.length)));
+  $('nameField').innerHTML = name.slice(0, n) + '<span class="caret"></span>';
+  shown($('note1'), t >= 2.9 && t < 3.95);
+  shown($('mcp'), t >= 4.0 && t < 5.55);
+  shown($('note2'), t >= 5.7 && t < 7.05);
+  const f = t < 7.1 ? 0 : t < 7.35 ? (t - 7.1) / 0.25 : t < 7.6 ? 1 : t < 7.95 ? 1 - (t - 7.6) / 0.35 : 0;
+  $('fade').style.opacity = String(f);
+  const after = t >= 7.6;
+  $('acctName').innerHTML = after ? 'Client <span class="warn">(signed out)</span>' : 'Personal';
+  $('who').textContent = after ? 'not signed in' : 'you@personal.dev';
+  $('pBefore').style.visibility = after ? 'hidden' : 'visible';
+  $('pAfter').style.visibility = after ? 'visible' : 'hidden';
+  shown($('msgs'), !after, 'flex');
+  shown($('signin'), after, 'flex');
+  shown($('chatInput'), !after);
+  $('signBtn').classList.toggle('hot', t >= 9.3);
+  const cap = [...caps].reverse().find((k) => t >= k[0]);
+  $('capn').textContent = cap[1];
+  $('capt').textContent = cap[2];
+};
+render(0);
+</script>
+</body></html>
