@@ -153,9 +153,10 @@ document.addEventListener('keydown', (ev) => {
         .map((a, i) => {
           const avatar = `<span class="av" style="background:${AVATAR[i % AVATAR.length]}" aria-hidden="true">${esc(a.name.charAt(0).toUpperCase())}<span class="st ${a.signedIn === false ? 'warn' : a.signedIn ? 'ok' : 'unk'}"></span></span>`;
           const info = `<span class="who"><span class="n">${esc(a.name)}</span><span class="mut small">${esc(a.folder)}${stateText(a)}</span></span>`;
+          const rename = `<button class="icon" data-cmd="rename" data-arg="${esc(a.name)}" title="Rename ${esc(a.name)}" aria-label="Rename ${esc(a.name)}"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 2.5l3 3L6 13H3v-3z"/><path d="M9 4l3 3"/></svg></button>`;
           return a.isCurrent
-            ? `<div class="acc here">${avatar}${info}<span class="pill">This window</span></div>`
-            : `<div class="acc">${avatar}${info}<button class="btn small" data-cmd="switchTo" data-arg="${esc(a.name)}" title="Switch this window to ${esc(a.name)}">Switch</button></div>`;
+            ? `<div class="acc here">${avatar}${info}${rename}<span class="pill">This window</span></div>`
+            : `<div class="acc">${avatar}${info}${rename}<button class="btn small" data-cmd="switchTo" data-arg="${esc(a.name)}" title="Switch this window to ${esc(a.name)}">Switch</button></div>`;
         })
         .join('')}
       <div class="actions">
@@ -282,6 +283,10 @@ h3 { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: u
 .who .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pill { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--vscode-badge-background, rgba(128,128,128,.3)); color: var(--vscode-badge-foreground, inherit); white-space: nowrap; }
 .btn.small { width: auto; padding: 3px 10px; font-size: 12px; }
+.icon { flex: none; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: none; color: inherit; cursor: pointer; opacity: 0; }
+.acc:hover .icon, .icon:focus-visible { opacity: .75; }
+.icon:hover { opacity: 1; background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.2)); }
+.icon:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .actions .btn { margin-top: 0; font-size: 12px; padding: 6px 6px; flex: 1 1 auto; width: auto; white-space: nowrap; }
 .warnText { color: var(--vscode-editorWarning-foreground, #CCA700); }

@@ -62,6 +62,11 @@
         "category": "Claude Multi-Account"
       },
       {
+        "command": "claudeMultiAccount.renameAccount",
+        "title": "Rename account",
+        "category": "Claude Multi-Account"
+      },
+      {
         "command": "claudeMultiAccount.adoptFolder",
         "title": "Adopt an existing config folder",
         "category": "Claude Multi-Account"
