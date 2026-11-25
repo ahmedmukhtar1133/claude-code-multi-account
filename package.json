@@ -1,0 +1,129 @@
+{
+  "name": "claude-code-shared-profiles",
+  "displayName": "Claude Code Shared Profiles",
+  "description": "Use a different account in each VS Code window while every account shares the same history, memory, skills and settings. Works with Claude Code. Never reads login data, makes no network calls.",
+  "version": "0.1.0",
+  "publisher": "deskworthy",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ahmedmukhtar1133/claude-code-shared-profiles"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "claude-code",
+    "multiple accounts",
+    "account switcher",
+    "profiles",
+    "CLAUDE_CONFIG_DIR"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./out/src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sharedProfiles.switch",
+        "title": "Switch account",
+        "category": "Shared Profiles"
+      },
+      {
+        "command": "sharedProfiles.addAccount",
+        "title": "Add account",
+        "category": "Shared Profiles"
+      },
+      {
+        "command": "sharedProfiles.adoptFolder",
+        "title": "Adopt an existing config folder",
+        "category": "Shared Profiles"
+      },
+      {
+        "command": "sharedProfiles.undoAdoption",
+        "title": "Undo an adoption",
+        "category": "Shared Profiles"
+      },
+      {
+        "command": "sharedProfiles.repair",
+        "title": "Repair links",
+        "category": "Shared Profiles"
+      },
+      {
+        "command": "sharedProfiles.doctor",
+        "title": "Doctor",
+        "category": "Shared Profiles"
+      },
+      {
+        "command": "sharedProfiles.syncMcp",
+        "title": "Copy MCP servers between accounts",
+        "category": "Shared Profiles"
+      }
+    ],
+    "configuration": {
+      "title": "Shared Profiles",
+      "properties": {
+        "sharedProfiles.accounts": {
+          "type": "array",
+          "scope": "application",
+          "default": [],
+          "markdownDescription": "Accounts. `folder` is relative to your home folder, so the same list works on every machine. Leave `folder` out (or `null`) for the default account, which uses `~/.claude` and is also where shared data lives.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Shown in the status bar."
+              },
+              "folder": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Config folder relative to home, for example .claude-work. Null for the default account."
+              }
+            }
+          }
+        },
+        "sharedProfiles.defaultAccount": {
+          "type": "string",
+          "scope": "application",
+          "default": "",
+          "description": "Account used by windows that have no account chosen yet. Empty means the default account (~/.claude)."
+        },
+        "sharedProfiles.unsharedProjects": {
+          "type": "array",
+          "scope": "application",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "markdownDescription": "Project folders (absolute or `~/...`) whose Claude history stays separate in each non-default account, for example client repos under NDA. Empty means everything is shared."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "test": "tsc -p . && node --test out/test/*.test.js",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "~1.85.0",
+    "@vscode/vsce": "^4.1.1",
+    "typescript": "^5.4.0"
+  }
+}
