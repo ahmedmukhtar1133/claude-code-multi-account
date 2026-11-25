@@ -10,18 +10,26 @@
     "type": "git",
     "url": "https://github.com/ahmedmukhtar1133/claude-code-multi-account"
   },
+  "homepage": "https://github.com/ahmedmukhtar1133/claude-code-multi-account#readme",
+  "bugs": {
+    "url": "https://github.com/ahmedmukhtar1133/claude-code-multi-account/issues"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
+    "AI",
     "Other"
   ],
   "keywords": [
+    "claude",
     "claude-code",
     "multiple accounts",
     "multi-account",
     "account switcher",
+    "switch account",
     "shared history",
+    "profiles",
     "CLAUDE_CONFIG_DIR"
   ],
   "extensionKind": [
@@ -59,6 +67,11 @@
       {
         "command": "claudeMultiAccount.addAccount",
         "title": "Add account",
+        "category": "Claude Multi-Account"
+      },
+      {
+        "command": "claudeMultiAccount.renameAccount",
+        "title": "Rename account",
         "category": "Claude Multi-Account"
       },
       {
@@ -144,5 +157,9 @@
     "@types/vscode": "~1.85.0",
     "@vscode/vsce": "^4.1.1",
     "typescript": "^5.4.0"
+  },
+  "galleryBanner": {
+    "color": "#141413",
+    "theme": "dark"
   }
 }

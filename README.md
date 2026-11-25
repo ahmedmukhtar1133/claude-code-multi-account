@@ -83,7 +83,7 @@ The Multi-Account icon in the Activity Bar opens a panel with:
 
 - **This window:** its account, whether it's signed in, and a Switch button.
 - **Recent sessions in this project** (collapsed): the latest sessions by title, with an Active badge on any still running. Click one to open it in Claude Code.
-- **Accounts:** every account with a Switch link, a button to copy MCP servers from another account, and Add account.
+- **Accounts:** every account with a Switch link and a rename button (shown on hover), a button to copy MCP servers from another account, and Add account.
 - **Health:** what the Doctor found, with Repair links or a link to any other account switcher that's installed.
 - **Shared by all accounts:** how many projects, sessions, skills, agents and commands every account sees.
 
@@ -95,6 +95,7 @@ A new skill is shared with the other accounts within a few seconds; agents, comm
 |---|---|
 | Switch account | Picks the account for this window, then reloads. Also in the status bar. |
 | Add account | Creates a new account folder linked to the shared store. |
+| Rename account | Changes an account's name. The folder stays where it is, so the account stays signed in, and windows that remember the old name still open on it. |
 | Adopt an existing config folder | Merges another account's folder into the store, with backup and undo. |
 | Undo an adoption | Reverses an adoption or repair from its journal. |
 | Repair links | Recreates missing links and adopts new skills made on any account. Also runs quietly at startup. |

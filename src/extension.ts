@@ -20,6 +20,8 @@ const home = os.homedir();
 const K_CHOICE = 'account';
 const K_EMPTY_WINDOW = 'emptyWindowAccount';
 const K_NO_SETUP_PROMPT = 'noSetupPrompt';
+/** Old name to new name, so choices saved under an old name (in every folder's state) still resolve. */
+const K_RENAMES = 'renamedAccounts';
 /** A choice made in an empty window, carried to the next folder opened (from the welcome page or recent list). */
 const K_CARRY = 'carryToNextFolder';
 const CARRY_MS = 10 * 60 * 1000;
@@ -76,10 +78,20 @@ function currentProjectKey(): string | undefined {
   return f && f.uri.scheme === 'file' ? projectKey(f.uri.fsPath) : undefined;
 }
 
+/** Follows renames: a name saved before a rename resolves to the account's current name. */
+function currentName(n?: string): string | undefined {
+  const renames = ctx.globalState.get<Record<string, string>>(K_RENAMES) ?? {};
+  for (let hops = 0; n !== undefined && renames[n] !== undefined && hops < 20; hops++) n = renames[n];
+  return n;
+}
+
 function chosenAccount(): Account | undefined {
   const list = accounts();
   if (!list.length) return undefined;
-  const byName = (n?: string) => (n ? list.find((a) => a.name === n) : undefined);
+  const byName = (n?: string) => {
+    const name = currentName(n);
+    return name ? list.find((a) => a.name === name) : undefined;
+  };
 
   // 1. The same window a moment ago (folder change or reload): the window keeps its account.
   const handed = byName(takeHandoff());
@@ -272,6 +284,8 @@ async function onPanelMessage(m: PanelMessage): Promise<void> {
     }
     case 'add':
       return cmdAddAccount();
+    case 'rename':
+      return cmdRename(m.arg);
     case 'adopt':
       return cmdAdoptFolder(m.arg);
     case 'copyMcp': {
@@ -418,6 +432,59 @@ async function cmdAddAccount(): Promise<void> {
     await rememberChoice(name);
     await vscode.commands.executeCommand('workbench.action.reloadWindow');
   }
+}
+
+/**
+ * Renames an account. Only the name changes: the folder stays where it is, because Claude Code
+ * keys the sign-in to the folder path, so moving it would sign the account out.
+ */
+async function cmdRename(name?: string): Promise<void> {
+  const list = accounts();
+  if (!list.length) {
+    void vscode.window.showInformationMessage('There are no accounts to rename yet.');
+    return;
+  }
+  const target = name ? list.find((a) => a.name === name) : await pickAccount('Account to rename');
+  if (!target) return;
+  const next = (
+    await vscode.window.showInputBox({
+      title: `Rename "${target.name}"`,
+      value: target.name,
+      prompt: 'Only the name changes. The folder and the sign-in stay as they are.',
+      validateInput: (v) => {
+        const t = v.trim();
+        if (!t) return 'Enter a name';
+        return t !== target.name && list.some((a) => a.name === t) ? 'That name is taken' : undefined;
+      },
+    })
+  )?.trim();
+  if (!next || next === target.name) return;
+
+  try {
+    const renames = { ...(ctx.globalState.get<Record<string, string>>(K_RENAMES) ?? {}) };
+    delete renames[next]; // the new name is a real account again, not an alias
+    renames[target.name] = next;
+    await ctx.globalState.update(K_RENAMES, renames);
+    // Update this window first, so the settings change below doesn't ask for a reload.
+    if (active?.name === target.name) active = { ...active, name: next };
+    if (handoffName === target.name) handoffName = next;
+    if (ctx.workspaceState.get<string>(K_CHOICE) === target.name) await ctx.workspaceState.update(K_CHOICE, next);
+    if (ctx.globalState.get<string>(K_EMPTY_WINDOW) === target.name) await ctx.globalState.update(K_EMPTY_WINDOW, next);
+    const login = logins.get(target.name);
+    if (login) logins.set(next, login);
+    if (cfg().get<string>('defaultAccount') === target.name) {
+      await cfg().update('defaultAccount', next, vscode.ConfigurationTarget.Global);
+    }
+    await saveAccounts(list.map((a) => (a.name === target.name ? { ...a, name: next } : a)));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log.appendLine(`Rename of "${target.name}" failed: ${msg}`);
+    void vscode.window.showErrorMessage(`Couldn't rename "${target.name}": ${msg}`);
+    return;
+  }
+  log.appendLine(`Renamed "${target.name}" to "${next}" (folder unchanged)`);
+  renderStatus();
+  void panel?.refresh();
 }
 
 function candidateFolders(): string[] {
@@ -724,6 +791,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const reg = (id: string, fn: () => Promise<void>) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
   reg('claudeMultiAccount.switch', cmdSwitch);
   reg('claudeMultiAccount.addAccount', cmdAddAccount);
+  reg('claudeMultiAccount.renameAccount', () => cmdRename());
   reg('claudeMultiAccount.adoptFolder', () => cmdAdoptFolder());
   reg('claudeMultiAccount.undoAdoption', cmdUndo);
   reg('claudeMultiAccount.repair', cmdRepair);
