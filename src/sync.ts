@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { MIXED_DIRS, SHARED_FILES, SHARED_ITEMS } from './layout';
+import { isOwnInMixed, MERGED_JSON, MIXED_DIRS, SHARED_FILES, SHARED_ITEMS } from './layout';
 import { Journal } from './journal';
 import { ensureLink, isLinkTo, lstatOrNull, Platform } from './link';
 
@@ -214,6 +214,36 @@ function syncShared(ctx: SyncContext, item: string): void {
  * A folder that stays real in the account, with each child linked to the
  * store's child of the same name, except the `keep` names, which stay the account's own.
  */
+/**
+ * Merges a JSON object of entries (keyed by name) from the account's copy into the store's copy:
+ * entries only the account has are added, and an entry with a newer lastUpdated replaces the store's.
+ * The store file is rewritten in place, so links (and Windows hard links) to it stay valid.
+ * Returns false when either file isn't a JSON object, so the caller can fall back to a normal merge.
+ */
+function mergeJsonEntries(incoming: string, target: string): boolean {
+  let a: unknown;
+  let s: unknown;
+  try {
+    a = JSON.parse(fs.readFileSync(incoming, 'utf8'));
+    s = JSON.parse(fs.readFileSync(target, 'utf8'));
+  } catch {
+    return false;
+  }
+  const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+  if (!isObj(a) || !isObj(s)) return false;
+  const stamp = (v: unknown) => (isObj(v) && typeof v.lastUpdated === 'string' ? Date.parse(v.lastUpdated) || 0 : 0);
+  const out: Record<string, unknown> = { ...s };
+  let changed = false;
+  for (const [k, v] of Object.entries(a)) {
+    if (!(k in out) || stamp(v) > stamp(out[k])) {
+      if (JSON.stringify(out[k]) !== JSON.stringify(v)) changed = true;
+      out[k] = v;
+    }
+  }
+  if (changed) fs.writeFileSync(target, JSON.stringify(out, null, 2));
+  return true;
+}
+
 function syncMixed(ctx: SyncContext, dir: string, keep: ReadonlySet<string>, ensure: readonly string[] = []): void {
   const a = path.join(ctx.accountRoot, dir);
   const s = path.join(ctx.store, dir);
@@ -228,11 +258,19 @@ function syncMixed(ctx: SyncContext, dir: string, keep: ReadonlySet<string>, ens
     const t = path.join(s, child);
     const cst = lstatOrNull(p);
     if (!cst) continue;
-    if (keep.has(child)) {
-      // An item that became per-account: replace the link with an empty folder of its own.
+    if (keep.has(child) || isOwnInMixed(dir, child)) {
+      // An item that became per-account: drop the link. A folder gets an empty one of its own;
+      // a file (a cache) is recreated by Claude Code.
       if (cst.isSymbolicLink()) {
+        const wasDir = (() => {
+          try {
+            return fs.statSync(p).isDirectory();
+          } catch {
+            return keep.has(child);
+          }
+        })();
         unlinkOnly(ctx, p);
-        mkdirp(ctx, p);
+        if (wasDir) mkdirp(ctx, p);
       }
       continue;
     }
@@ -241,13 +279,15 @@ function syncMixed(ctx: SyncContext, dir: string, keep: ReadonlySet<string>, ens
       continue;
     }
     if (cst.isSymbolicLink()) unlinkOnly(ctx, p);
-    else mergeInto(ctx, p, t);
+    else if (cst.isFile() && MERGED_JSON[dir]?.has(child) && lstatOrNull(t)?.isFile() && mergeJsonEntries(p, t)) {
+      move(ctx, p, backupPath(ctx, p)); // its entries are in the store now; relinked below
+    } else mergeInto(ctx, p, t);
   }
 
   for (const name of ensure) if (!keep.has(name)) mkdirp(ctx, path.join(s, name));
 
   for (const child of fs.readdirSync(s)) {
-    if (keep.has(child)) continue;
+    if (keep.has(child) || isOwnInMixed(dir, child)) continue;
     const t = path.join(s, child);
     const p = path.join(a, child);
     if (exists(p) && !lstatOrNull(p)!.isSymbolicLink()) {

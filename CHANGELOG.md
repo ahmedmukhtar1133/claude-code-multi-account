@@ -3,6 +3,8 @@
 ## 0.1.1
 
 - If a second copy of the extension is running in the same window (for example a `.vsix` next to the store version), the second copy now stays inactive instead of switching the window to the default account, and the active copy warns that the extension is installed twice.
+- Plugin caches (`plugin-directory-cache-v2.json`, `plugin-catalog-cache.json`, `.last_inuse_sweep`) are now per account. Claude Code rewrites them on every start, which used to break the link and put the account's copy aside as a clash.
+- `plugins/known_marketplaces.json` stays shared: when Claude Code replaces it, Repair merges the account's entries back into the shared copy (newest wins) instead of setting them aside.
 
 ## 0.1.0
 
