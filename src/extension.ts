@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { adopt, clearSetUp, isBlank, isSetUp, listRuns, markSetUp, repair, shareableSize, undo } from './adopt';
 import { findClaude, isLoggedIn, runClaude } from './claudeCli';
-import { Finding, runDoctor } from './doctor';
+import { Finding, runDoctor, tokenLeftoverDirs } from './doctor';
 import { Busy } from './journal';
 import { projectKey } from './layout';
 import { describe, McpServer, parseGet, parseList } from './mcpSync';
@@ -242,7 +242,8 @@ async function panelState(): Promise<PanelState> {
   const list = accounts();
   void checkLogins(); // fills in sign-in state, then refreshes the panel again
   const key = currentProjectKey();
-  const projDir = key && active ? path.join(accountDir(active, home), 'projects', key) : undefined;
+  // Sessions are shared, so before any account is set up they are read from ~/.claude directly.
+  const projDir = key ? path.join(active ? accountDir(active, home) : storeDir(home), 'projects', key) : undefined;
   const findings = list.length
     ? runDoctor({
         home,
@@ -252,6 +253,7 @@ async function panelState(): Promise<PanelState> {
         extensions: vscode.extensions.all.map((e) => e.id),
         loggedIn: Object.fromEntries([...logins].map(([k, v]) => [k, v.v])),
         unsharedProjectKeys: unsharedKeys(),
+        current: active?.name,
       })
     : [];
   return {
@@ -295,8 +297,19 @@ async function onPanelMessage(m: PanelMessage): Promise<void> {
       if (from) await syncMcp(from, active);
       return;
     }
+    case 'refresh':
+      return; // the panel re-reads everything after every message
     case 'repair':
       return cmdRepair();
+    case 'removeTokenLeftovers':
+      return removeTokenLeftovers();
+    case 'removeClaudeEnvSetting':
+      return removeClaudeEnvSetting();
+    case 'removeSettingsEnv':
+      return removeSettingsEnv();
+    case 'openSetting':
+      if (m.arg && /^[A-Za-z0-9.]+$/.test(m.arg)) await vscode.commands.executeCommand('workbench.action.openSettings', m.arg);
+      return;
     case 'doctor':
       return cmdDoctor();
     case 'showExt':
@@ -657,6 +670,7 @@ async function cmdDoctor(): Promise<void> {
     extensions: vscode.extensions.all.map((e) => e.id),
     loggedIn,
     unsharedProjectKeys: unsharedKeys(),
+    current: active?.name,
   });
   if (!bin) findings.unshift({ level: 'warn', message: 'Could not find the claude CLI, so sign-in state was not checked.' });
   if (!list.length) findings.unshift({ level: 'info', message: 'No accounts set up yet. Run "Claude Multi-Account: Add account" or "Adopt an existing config folder".' });
@@ -666,8 +680,89 @@ async function cmdDoctor(): Promise<void> {
   log.show(true);
   const worst = findings.find((f) => f.level === 'error') ?? findings.find((f) => f.level === 'warn');
   if (worst) {
-    const btn = await vscode.window.showWarningMessage(`Doctor: ${worst.message}`, ...(findings.some((f) => f.fix) ? ['Repair links'] : []));
-    if (btn) await cmdRepair();
+    const action = worst.actions?.[0];
+    const btn = await vscode.window.showWarningMessage(`Doctor: ${worst.title ? worst.title + '. ' : ''}${worst.message}`, ...(action ? [action.label] : []));
+    if (btn && action) await onPanelMessage({ cmd: action.cmd, arg: action.arg });
+  }
+}
+
+// ---------- fixes offered by Doctor ----------
+
+/** Deletes Claude Code Manager's plain-text token copies. Never opens them; asks first, since it can't be undone. */
+async function removeTokenLeftovers(): Promise<void> {
+  const dirs = tokenLeftoverDirs(home, accounts());
+  if (!dirs.length) return;
+  if (vscode.extensions.getExtension('vishalguptax.claude-manager')) {
+    void vscode.window.showWarningMessage('Claude Code Manager is still installed and uses these folders. Uninstall it first.');
+    return;
+  }
+  const list = dirs.map((d) => `~/${path.relative(home, d)}`).join('\n');
+  const ok = await vscode.window.showWarningMessage(
+    'Delete the leftover login tokens?',
+    {
+      modal: true,
+      detail: `${list}\n\nClaude Code Manager saved plain-text copies of login tokens here. Your sign-ins don't use them, so every account stays signed in. They are deleted permanently, not moved to the Trash, so the tokens don't linger on disk.`,
+    },
+    'Delete',
+  );
+  if (ok !== 'Delete') return;
+  const failed: string[] = [];
+  for (const d of dirs) {
+    try {
+      fs.rmSync(d, { recursive: true, force: true });
+      log.appendLine(`Deleted ${d}`);
+    } catch (e) {
+      failed.push(d);
+      log.appendLine(`Could not delete ${d}: ${(e as Error).message}`);
+    }
+  }
+  if (failed.length) void vscode.window.showErrorMessage(`Could not delete ${failed.length} folder(s). See the output panel.`);
+  else void vscode.window.showInformationMessage('Leftover tokens deleted.');
+}
+
+/** Removes CLAUDE_CONFIG_DIR from claudeCode.environmentVariables wherever it is set (user, workspace, folder). */
+async function removeClaudeEnvSetting(): Promise<void> {
+  const c = vscode.workspace.getConfiguration('claudeCode');
+  const info = c.inspect<unknown>('environmentVariables');
+  const strip = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.filter((e) => !(e && (e as { name?: unknown }).name === 'CLAUDE_CONFIG_DIR'));
+    if (v && typeof v === 'object') {
+      const o = { ...(v as Record<string, unknown>) };
+      delete o.CLAUDE_CONFIG_DIR;
+      return o;
+    }
+    return v;
+  };
+  const targets: [unknown, vscode.ConfigurationTarget][] = [
+    [info?.globalValue, vscode.ConfigurationTarget.Global],
+    [info?.workspaceValue, vscode.ConfigurationTarget.Workspace],
+    [info?.workspaceFolderValue, vscode.ConfigurationTarget.WorkspaceFolder],
+  ];
+  try {
+    for (const [v, t] of targets) if (v !== undefined) await c.update('environmentVariables', strip(v), t);
+  } catch (e) {
+    void vscode.window.showErrorMessage(`Couldn't change claudeCode.environmentVariables: ${(e as Error).message}`);
+    return;
+  }
+  const go = await vscode.window.showInformationMessage('Removed CLAUDE_CONFIG_DIR from claudeCode.environmentVariables. Reload so Claude Code starts on this window\'s account.', 'Reload');
+  if (go) await vscode.commands.executeCommand('workbench.action.reloadWindow');
+}
+
+/** Opens the shared settings.json at its env.CLAUDE_CONFIG_DIR key, for a hand edit (it may hold comments or other env keys). */
+async function removeSettingsEnv(): Promise<void> {
+  const file = path.join(storeDir(home), 'settings.json');
+  try {
+    const doc = await vscode.workspace.openTextDocument(file);
+    const ed = await vscode.window.showTextDocument(doc);
+    const at = doc.getText().indexOf('"CLAUDE_CONFIG_DIR"');
+    if (at >= 0) {
+      const line = doc.positionAt(at).line;
+      ed.selection = new vscode.Selection(line, 0, line + 1, 0);
+      ed.revealRange(ed.selection, vscode.TextEditorRevealType.InCenter);
+    }
+    void vscode.window.showInformationMessage('Delete the selected CLAUDE_CONFIG_DIR line and save.');
+  } catch (e) {
+    void vscode.window.showErrorMessage(`Couldn't open ${file}: ${(e as Error).message}`);
   }
 }
 
@@ -807,11 +902,7 @@ export function activate(context: vscode.ExtensionContext): void {
       .then((b) => b && vscode.commands.executeCommand('workbench.extensions.action.showExtensionsWithIds', twins.map((x) => x.id)));
   }
 
-  if (active) {
-    const dir = accountDir(active, home);
-    if (!isDefault(active) && !isSetUp(dir) && !isBlank(dir)) void offerAdoptActive(active);
-    else repairOne(active, true);
-  }
+  if (active) prepareActive(active);
 
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   status.command = 'claudeMultiAccount.switch';
@@ -830,7 +921,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (!e.affectsConfiguration('claudeMultiAccount')) return;
       const next = chosenAccount();
-      if (next?.name !== active?.name || accountDir(next ?? { name: '' }, home) !== accountDir(active ?? { name: '' }, home)) {
+      if (next && next.name !== active?.name && sameConfigDir(configDirEnv(next, home), process.env.CLAUDE_CONFIG_DIR)) {
+        // Claude Code in this window already uses this account's folder (typically the first
+        // account added is ~/.claude, which the window was running on all along): no reload.
+        log.appendLine(`Window account: ${next.name} (now listed; Claude Code already uses its folder, no reload needed)`);
+        takeLive(next);
+      } else if (next?.name !== active?.name || accountDir(next ?? { name: '' }, home) !== accountDir(active ?? { name: '' }, home)) {
         void vscode.window
           .showInformationMessage(`The account for this window is now "${next?.name ?? 'none'}". Reload to apply it.`, 'Reload')
           .then((b) => b && vscode.commands.executeCommand('workbench.action.reloadWindow'));
@@ -843,6 +939,33 @@ export function activate(context: vscode.ExtensionContext): void {
   if (!active) void offerSetup();
   else {
     setTimeout(() => void refreshSignedIn(), 4000);
+    watchSignIn();
+  }
+}
+
+/** Links an account's folder, or offers an adoption if it holds its own data. */
+function prepareActive(a: Account): void {
+  const dir = accountDir(a, home);
+  if (!isDefault(a) && !isSetUp(dir) && !isBlank(dir)) void offerAdoptActive(a);
+  else repairOne(a, true);
+}
+
+/** Two CLAUDE_CONFIG_DIR values point Claude Code at the same login (unset and ~/.claude do not). */
+function sameConfigDir(a: string | undefined, b: string | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return path.resolve(a) === path.resolve(b);
+}
+
+/** Makes an account this window's account without a reload; only safe when Claude Code already uses its folder. */
+function takeLive(a: Account): void {
+  const first = !active;
+  active = a;
+  applyEnv(a);
+  prepareActive(a);
+  renderStatus();
+  void panel?.refresh();
+  if (first) {
+    setTimeout(() => void refreshSignedIn(), 1000);
     watchSignIn();
   }
 }

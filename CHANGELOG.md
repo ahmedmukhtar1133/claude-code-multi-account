@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- Setting up the first account no longer needs a reload. When the window is already running on that account's folder (the usual case: the first account is `~/.claude`), the status bar, the panel and the Sessions tab switch to it right away. A reload is only asked for when Claude Code in the window uses a different folder.
+- Status tab: each problem is a card with a short title and its own fix button (Repair links, Delete leftover tokens, Remove the overriding setting, Switch to a signed-out account, Show in Extensions). Doctor's notification offers the same fix.
+- Leftover Claude Code Manager token copies (`manager-accounts`) can be deleted from the panel after a confirm, and are now found in every account folder, not only `~/.claude`. If Claude Code Manager is still installed, the panel points to it instead.
+- Sessions tab: shows the project's sessions even before any account is set up (they are read from `~/.claude`), and has a Refresh link.
+
 ## 0.1.1
 
 - If a second copy of the extension is running in the same window (for example a `.vsix` next to the store version), the second copy now stays inactive instead of switching the window to the default account, and the active copy warns that the extension is installed twice.

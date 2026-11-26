@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { test } from 'node:test';
 import { adopt } from '../src/adopt';
-import { runDoctor } from '../src/doctor';
+import { runDoctor, tokenLeftoverDirs } from '../src/doctor';
 import { argsLookSplit, describe, parseGet, parseList } from '../src/mcpSync';
 import { cleanup, tempHome, write } from './helpers';
 
@@ -84,12 +84,32 @@ test('doctor is clean after adoption and spots the known traps', () => {
       claudeEnvSetting: [{ name: 'CLAUDE_CONFIG_DIR', value: '/y' }],
       loggedIn: { Work: false },
     });
-    const text = bad.map((f) => f.message).join('\n');
+    const text = bad.map((f) => `${f.title ?? ''} ${f.message}`).join('\n');
     assert.match(text, /settings\.json sets env\.CLAUDE_CONFIG_DIR/);
     assert.match(text, /claudeCode\.environmentVariables sets CLAUDE_CONFIG_DIR/);
     assert.match(text, /points at ~\/\.claude explicitly/);
-    assert.match(text, /"Work" is not signed in/);
+    assert.match(text, /Work is signed out/);
+    assert.ok(bad.find((f) => f.title === 'Work is signed out')?.actions?.some((a) => a.cmd === 'switchTo' && a.arg === 'Work'));
+    const here = runDoctor({ home, accounts, loggedIn: { Work: false }, current: 'Work' }).find((f) => f.title === 'Work is signed out');
+    assert.ok(here && !here.actions?.length, 'no "Switch to" for the account this window already uses');
     assert.match(text, /skills\/new-skill/);
+  } finally {
+    cleanup(home);
+  }
+});
+
+test('doctor offers to delete Claude Code Manager token copies, in ~/.claude and account folders', () => {
+  const home = tempHome();
+  try {
+    write(path.join(home, '.claude'), { 'settings.json': '{}', 'manager-accounts/org/tokens': 'x' });
+    write(path.join(home, '.claude-work'), { 'manager-accounts/org/tokens': 'y' });
+    const accounts = [{ name: 'Personal' }, { name: 'Work', folder: '.claude-work' }];
+    assert.equal(tokenLeftoverDirs(home, accounts).length, 2);
+    const f = runDoctor({ home, accounts }).find((x) => x.title === 'Leftover login tokens');
+    assert.deepEqual(f?.actions?.map((a) => a.cmd), ['removeTokenLeftovers']);
+    assert.match(f!.message, /~\/\.claude\/manager-accounts, ~\/\.claude-work\/manager-accounts/);
+    const withManager = runDoctor({ home, accounts, extensions: ['vishalguptax.claude-manager'] }).find((x) => x.title === 'Leftover login tokens');
+    assert.deepEqual(withManager?.actions?.map((a) => a.cmd), ['showExt']);
   } finally {
     cleanup(home);
   }

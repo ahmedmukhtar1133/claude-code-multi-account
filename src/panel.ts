@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { Finding } from './doctor';
 import { SessionInfo, SharedCounts, timeAgo } from './stats';
 
 export interface PanelAccount {
@@ -9,12 +10,7 @@ export interface PanelAccount {
   signedIn?: boolean;
 }
 
-export interface PanelHealth {
-  level: 'ok' | 'info' | 'warn' | 'error';
-  message: string;
-  extensions?: string[];
-  fix?: string;
-}
+export type PanelHealth = Finding;
 
 export interface PanelState {
   accounts: PanelAccount[];
@@ -42,6 +38,8 @@ const APPS: readonly [string, string][] = [
   ['DiskAtlas', 'disk-space-analyzer'],
   ['Kempt', 'mac-maintenance'],
 ];
+
+const REFRESH = '<a class="link" href="#" data-cmd="refresh">Refresh</a>';
 
 const AVATAR = ['#D97757', '#3B82F6', '#18A7A1', '#8A4A78', '#C08A2D', '#4F7A3A'];
 
@@ -181,25 +179,18 @@ document.addEventListener('keydown', (ev) => {
           : shown.length
             ? `<div class="list">${shown.map(row).join('')}${rest.length ? `<div id="more-rows" class="list" hidden>${rest.map(row).join('')}</div>` : ''}</div>
           ${rest.length ? `<button id="more-btn" class="btn ghost" data-label="Show ${rest.length} more">Show ${rest.length} more</button>` : ''}
-          <div class="mut small pad">Sessions from every account. Click one to open it in Claude Code.</div>`
-            : '<div class="mut pad">No sessions in this project yet.</div>'
+          <div class="mut small pad">Sessions from every account. Click one to open it in Claude Code. ${REFRESH}</div>`
+            : `<div class="mut pad">No sessions in this project yet. ${REFRESH}</div>`
       }</div>`;
 
     const c = s.shared;
     const status = `<div role="tabpanel" id="p-status" aria-labelledby="t-status" class="panel" hidden>
       ${
         problems.length
-          ? problems
-              .map(
-                (h) =>
-                  `<div class="health"><span class="dot ${h.level === 'error' ? 'err' : 'warn'}" aria-hidden="true"></span><span>${esc(h.message)}${
-                    h.extensions?.length ? ` <a class="link" href="#" data-cmd="showExt" data-arg="${esc(h.extensions.join(','))}">Show in Extensions</a>` : ''
-                  }</span></div>`,
-              )
-              .join('') + (problems.some((h) => h.fix) ? '<button class="btn" data-cmd="repair">Repair links</button>' : '')
-          : '<div class="health"><span class="dot ok" aria-hidden="true"></span><span>Everything is linked and working.</span></div>'
+          ? `<div class="findings">${problems.map((h) => this.finding(h)).join('')}</div>`
+          : '<div class="finding ok"><div class="fhead"><span class="ficon" aria-hidden="true">✓</span><span class="ft">All good</span></div><div class="fmsg mut">Everything is linked and nothing overrides this window\'s account.</div></div>'
       }
-      <a class="link pad" href="#" data-cmd="doctor">Run Doctor</a>
+      <a class="link pad" href="#" data-cmd="doctor">Run Doctor again</a>
       <h3>Shared by all accounts</h3>
       <div class="stats">
         <div><b>${c.projects}</b><span>projects</span></div>
@@ -210,6 +201,18 @@ document.addEventListener('keydown', (ev) => {
       <div class="mut small pad">Also shared: commands, CLAUDE.md, settings, hooks, plugins. Kept per account: login, MCP servers, folder trust.</div></div>`;
 
     return `<main>${accounts}${tabs}${sessions}${status}</main>`;
+  }
+
+  private finding(h: PanelHealth): string {
+    const err = h.level === 'error';
+    const actions = (h.actions ?? [])
+      .map((a, i) => `<button class="btn small${i ? ' ghost' : ''}" data-cmd="${esc(a.cmd)}"${a.arg !== undefined ? ` data-arg="${esc(a.arg)}"` : ''}>${esc(a.label)}</button>`)
+      .join('');
+    return `<div class="finding ${err ? 'err' : 'warn'}" role="group" aria-label="${esc(h.title ?? h.message)}">
+      <div class="fhead"><span class="ficon" aria-hidden="true">${err ? '✕' : '!'}</span><span class="ft">${esc(h.title ?? (err ? 'Problem' : 'Needs attention'))}</span></div>
+      <div class="fmsg">${esc(h.message)}</div>
+      ${actions ? `<div class="factions">${actions}</div>` : ''}
+    </div>`;
   }
 
   private setup(s: PanelState): string {
@@ -296,8 +299,18 @@ h3 { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: u
 .srow .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .srow .w { color: var(--vscode-descriptionForeground); white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
 .live { font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--vscode-testing-iconPassed, #73C991); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; }
-.health { display: flex; gap: 8px; align-items: baseline; padding: 2px 4px; min-width: 0; }
-.health > span:last-child { overflow-wrap: anywhere; }
+.findings { display: grid; gap: 8px; }
+.finding { --c: var(--vscode-editorWarning-foreground, #CCA700); display: grid; gap: 6px; padding: 10px 12px; border-radius: 6px; min-width: 0;
+  border: 1px solid var(--vscode-widget-border, rgba(128,128,128,.22)); border-left: 3px solid var(--c);
+  background: color-mix(in srgb, var(--c) 7%, transparent); }
+.finding.err { --c: var(--vscode-editorError-foreground, #F14C4C); }
+.finding.ok { --c: var(--vscode-testing-iconPassed, #73C991); }
+.fhead { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ficon { flex: none; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 800; line-height: 1; background: var(--c); color: var(--vscode-editor-background, #1E1E1E); }
+.ft { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.fmsg { font-size: 12px; line-height: 1.45; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; padding-left: 24px; }
+.factions { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 24px; }
+.factions .btn { margin-top: 0; }
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .stats div { display: grid; justify-items: center; padding: 6px 2px; border-radius: 4px; background: var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,.12)); }
 .stats b { font-size: 16px; font-variant-numeric: tabular-nums; }
