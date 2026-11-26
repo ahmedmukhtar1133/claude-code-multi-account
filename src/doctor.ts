@@ -6,14 +6,23 @@ import { Account, accountDir, isDefault, storeDir } from './paths';
 
 export type Level = 'ok' | 'info' | 'warn' | 'error';
 
+/** A button on a finding: a panel command (see onPanelMessage) and its argument. */
+export interface FindingAction {
+  label: string;
+  cmd: string;
+  arg?: string;
+}
+
 export interface Finding {
   level: Level;
+  /** Short heading for the panel card. */
+  title?: string;
   message: string;
-  /** Command id that fixes it, when there is one. */
-  fix?: string;
-  /** Extension ids the finding is about (other account switchers). */
-  extensions?: string[];
+  /** Buttons that fix it, first one primary. */
+  actions?: FindingAction[];
 }
+
+const REPAIR: FindingAction = { label: 'Repair links', cmd: 'repair' };
 
 /** Other extensions that set CLAUDE_CONFIG_DIR or swap logins. */
 export const OTHER_SWITCHERS: Readonly<Record<string, string>> = {
@@ -37,6 +46,8 @@ export interface DoctorInput {
   /** Signed-in state per account name, from `claude auth status`. */
   loggedIn?: Record<string, boolean | undefined>;
   unsharedProjectKeys?: ReadonlySet<string>;
+  /** Name of this window's account: its sign-in is fixed here, not by switching. */
+  current?: string;
 }
 
 function envNames(setting: unknown): string[] {
@@ -59,16 +70,31 @@ export function runDoctor(input: DoctorInput): Finding[] {
   try {
     const s = JSON.parse(fs.readFileSync(path.join(store, 'settings.json'), 'utf8')) as { env?: Record<string, unknown> };
     if (s.env && Object.prototype.hasOwnProperty.call(s.env, 'CLAUDE_CONFIG_DIR')) {
-      out.push({ level: 'error', message: 'settings.json sets env.CLAUDE_CONFIG_DIR. Every account shares settings.json, so this sends all of them to one folder. Remove that key.' });
+      out.push({
+        level: 'error',
+        title: 'settings.json overrides the account',
+        message: 'settings.json sets env.CLAUDE_CONFIG_DIR. Every account shares settings.json, so this sends all of them to one folder.',
+        actions: [{ label: 'Open settings.json', cmd: 'removeSettingsEnv' }],
+      });
     }
   } catch {
     /* no or unreadable settings.json: nothing to check */
   }
   if (envNames(input.claudeEnvSetting).includes('CLAUDE_CONFIG_DIR')) {
-    out.push({ level: 'error', message: 'claudeCode.environmentVariables sets CLAUDE_CONFIG_DIR. It overrides the account chosen for each window. Remove it from your VS Code settings.' });
+    out.push({
+      level: 'error',
+      title: 'Claude Code setting overrides the account',
+      message: 'claudeCode.environmentVariables sets CLAUDE_CONFIG_DIR, which overrides the account chosen for each window.',
+      actions: [{ label: 'Remove it', cmd: 'removeClaudeEnvSetting' }],
+    });
   }
   if (input.claudeProcessWrapper) {
-    out.push({ level: 'warn', message: 'claudeCode.claudeProcessWrapper is set. Switching works only if the wrapper passes CLAUDE_CONFIG_DIR through unchanged.' });
+    out.push({
+      level: 'warn',
+      title: 'Process wrapper is set',
+      message: 'claudeCode.claudeProcessWrapper is set. Switching works only if the wrapper passes CLAUDE_CONFIG_DIR through unchanged.',
+      actions: [{ label: 'Open setting', cmd: 'openSetting', arg: 'claudeCode.claudeProcessWrapper' }],
+    });
   }
   if (input.launchConfigDir) {
     out.push({ level: 'info', message: `VS Code was started with CLAUDE_CONFIG_DIR=${input.launchConfigDir}. This extension replaces it per window.` });
@@ -90,29 +116,71 @@ export function runDoctor(input: DoctorInput): Finding[] {
 
   for (const a of input.accounts) {
     const login = input.loggedIn?.[a.name];
-    if (login === false) out.push({ level: 'warn', message: `"${a.name}" is not signed in. Switch a window to it and sign in through the Claude Code panel.` });
+    if (login === false) {
+      out.push(
+        a.name === input.current
+          ? { level: 'warn', title: `${a.name} is signed out`, message: 'Sign in through the Claude Code panel in this window. This check updates on its own after you sign in.' }
+          : {
+              level: 'warn',
+              title: `${a.name} is signed out`,
+              message: 'Switch a window to it and sign in through the Claude Code panel.',
+              actions: [{ label: `Switch to ${a.name}`, cmd: 'switchTo', arg: a.name }],
+            },
+      );
+    }
     if (isDefault(a)) continue;
     out.push(...checkAccount(a, input.home, platform, input.unsharedProjectKeys ?? new Set()));
   }
 
   // Leftovers from token-copying switchers.
-  if (fs.existsSync(path.join(store, 'manager-accounts'))) {
-    out.push({ level: 'warn', message: `${path.join(store, 'manager-accounts')} exists. Claude Code Manager keeps copies of login tokens there in plain text. This extension never reads it; consider deleting it once you no longer use that switcher.` });
+  const leftovers = tokenLeftovers(input.home, input.accounts);
+  if (leftovers.length) {
+    const managerInstalled = (input.extensions ?? []).some((id) => id.toLowerCase() === MANAGER_ID);
+    out.push({
+      level: 'warn',
+      title: 'Leftover login tokens',
+      message: `${leftovers.join(', ')} ${leftovers.length > 1 ? 'hold' : 'holds'} plain-text copies of login tokens saved by Claude Code Manager. This extension never reads ${leftovers.length > 1 ? 'them' : 'it'}.${
+        managerInstalled ? ' Claude Code Manager is still installed and uses them; uninstall it first.' : ''
+      }`,
+      actions: managerInstalled
+        ? [{ label: 'Show in Extensions', cmd: 'showExt', arg: MANAGER_ID }]
+        : [{ label: leftovers.length > 1 ? 'Delete them' : 'Delete it', cmd: 'removeTokenLeftovers' }],
+    });
   }
   const switchers = (input.extensions ?? []).filter((id) => id.toLowerCase() in OTHER_SWITCHERS);
   if (switchers.length) {
     const names = switchers.map((id) => OTHER_SWITCHERS[id.toLowerCase()]).join(', ');
     out.push({
       level: 'warn',
-      message: `Another account switcher is installed: ${names}. Two switchers fight over the account. Disable it, or turn off its account switching.`,
-      extensions: switchers,
+      title: 'Another account switcher is installed',
+      message: `${names}. Two switchers fight over the account. Disable it, or turn off its account switching.`,
+      actions: [{ label: 'Show in Extensions', cmd: 'showExt', arg: switchers.join(',') }],
     });
   }
 
   if (!out.some((f) => f.level === 'error' || f.level === 'warn')) out.push({ level: 'ok', message: 'Everything is linked and nothing overrides the per-window account.' });
-  // Show paths inside the home folder as ~/..., which is shorter and doesn't print the user name.
-  const homePrefix = input.home.endsWith(path.sep) ? input.home : input.home + path.sep;
-  return out.map((f) => ({ ...f, message: f.message.split(homePrefix).join('~/') }));
+  return out.map((f) => ({ ...f, message: tilde(f.message, input.home) }));
+}
+
+const MANAGER_ID = 'vishalguptax.claude-manager';
+
+/** Shows paths inside the home folder as ~/..., which is shorter and doesn't print the user name. */
+function tilde(s: string, home: string): string {
+  const prefix = home.endsWith(path.sep) ? home : home + path.sep;
+  return s.split(prefix).join('~/');
+}
+
+/** manager-accounts folders (Claude Code Manager's plain-text token copies) in ~/.claude and every account folder. */
+export function tokenLeftoverDirs(home: string, accounts: Account[]): string[] {
+  const dirs = new Set([storeDir(home), ...accounts.map((a) => accountDir(a, home))].map((d) => path.join(path.resolve(d), 'manager-accounts')));
+  return [...dirs].filter((d) => {
+    const st = lstatOrNull(d);
+    return !!st && st.isDirectory() && !st.isSymbolicLink();
+  });
+}
+
+function tokenLeftovers(home: string, accounts: Account[]): string[] {
+  return tokenLeftoverDirs(home, accounts).map((d) => tilde(d, home));
 }
 
 function checkAccount(a: Account, home: string, platform: Platform, unshared: ReadonlySet<string>): Finding[] {
@@ -120,7 +188,7 @@ function checkAccount(a: Account, home: string, platform: Platform, unshared: Re
   const dir = accountDir(a, home);
   const store = storeDir(home);
   if (!fs.existsSync(dir)) {
-    out.push({ level: 'error', message: `"${a.name}": folder ${dir} is missing.`, fix: 'claudeMultiAccount.repair' });
+    out.push({ level: 'error', message: `"${a.name}": folder ${dir} is missing.`, title: `${a.name}: folder missing`, actions: [REPAIR] });
     return out;
   }
   const broken: string[] = [];
@@ -150,7 +218,7 @@ function checkAccount(a: Account, home: string, platform: Platform, unshared: Re
   }
   if (broken.length) {
     const hint = platform === 'win32' && broken.some((b) => SHARED_FILES.has(b)) ? ' On Windows a save can turn a linked file into a separate copy; Repair keeps the newer one.' : '';
-    out.push({ level: 'warn', message: `"${a.name}": not shared yet: ${broken.slice(0, 8).join(', ')}${broken.length > 8 ? ` and ${broken.length - 8} more` : ''}.${hint}`, fix: 'claudeMultiAccount.repair' });
+    out.push({ level: 'warn', title: `${a.name}: not fully shared`, actions: [REPAIR], message: `Not linked yet: ${broken.slice(0, 8).join(', ')}${broken.length > 8 ? ` and ${broken.length - 8} more` : ''}.${hint}` });
   }
   const unknown = fs.readdirSync(dir).filter((n) => classify(n) === 'unknown');
   if (unknown.length) {
