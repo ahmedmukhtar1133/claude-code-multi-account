@@ -18,13 +18,13 @@ const SITE_REF = '?ref=vscode&utm_campaign=claude-code-multi-account';
 const LAUNCH_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR;
 const home = os.homedir();
 const K_CHOICE = 'account';
+/** The account last chosen in any window. New windows, and folders that never chose one, start on it. */
+const K_LAST = 'lastChosenAccount';
+/** Before 1.0.0: the account last chosen in an empty window. Read once as a fallback for K_LAST. */
 const K_EMPTY_WINDOW = 'emptyWindowAccount';
 const K_NO_SETUP_PROMPT = 'noSetupPrompt';
 /** Old name to new name, so choices saved under an old name (in every folder's state) still resolve. */
 const K_RENAMES = 'renamedAccounts';
-/** A choice made in an empty window, carried to the next folder opened (from the welcome page or recent list). */
-const K_CARRY = 'carryToNextFolder';
-const CARRY_MS = 10 * 60 * 1000;
 /**
  * When a window closes its folder (or reloads), it writes its account to this file, synchronously,
  * so the next folder opened in that window starts on the same account. A file instead of
@@ -98,38 +98,40 @@ function chosenAccount(): Account | undefined {
   if (handed) {
     chosenBecause = 'kept from this window before the folder changed or reloaded';
     void ctx.workspaceState.update(K_CHOICE, handed.name);
-    if (!vscode.workspace.workspaceFolders) void ctx.globalState.update(K_EMPTY_WINDOW, handed.name);
     return handed;
   }
-  // 2. The choice saved for this folder (or for empty windows).
-  const saved = byName(ctx.workspaceState.get<string>(K_CHOICE) ?? (vscode.workspace.workspaceFolders ? undefined : ctx.globalState.get<string>(K_EMPTY_WINDOW)));
+  const mode = newWindowMode();
+  // 2. The choice saved for this folder.
+  const saved =
+    mode === 'folderThenLast' && vscode.workspace.workspaceFolders ? byName(ctx.workspaceState.get<string>(K_CHOICE)) : undefined;
   if (saved) {
-    chosenBecause = vscode.workspace.workspaceFolders ? 'saved for this folder' : 'saved for empty windows';
+    chosenBecause = 'saved for this folder';
     return saved;
   }
-  // 3. A choice made in an empty window shortly before this folder was opened from it.
-  if (vscode.workspace.workspaceFolders) {
-    const carry = ctx.globalState.get<{ name: string; at: number }>(K_CARRY);
-    const carried = carry && Date.now() - carry.at < CARRY_MS ? byName(carry.name) : undefined;
-    if (carried) {
-      chosenBecause = 'carried over from the empty window this folder was opened from';
-      void ctx.workspaceState.update(K_CHOICE, carried.name);
-      void ctx.globalState.update(K_CARRY, undefined);
-      return carried;
-    }
+  // 3. The account last chosen in any window.
+  const last =
+    mode === 'defaultAccount' ? undefined : byName(ctx.globalState.get<string>(K_LAST) ?? ctx.globalState.get<string>(K_EMPTY_WINDOW));
+  if (last) {
+    chosenBecause = 'last chosen in any window';
+    return last;
   }
   const fallback = byName(cfg().get<string>('defaultAccount')) ?? list.find(isDefault) ?? list[0];
   chosenBecause = 'default account';
   return fallback;
 }
 
+const NEW_WINDOW_MODES = ['folderThenLast', 'lastPicked', 'defaultAccount'] as const;
+type NewWindowMode = (typeof NEW_WINDOW_MODES)[number];
+
+function newWindowMode(): NewWindowMode {
+  const m = cfg().get<string>('newWindowAccount');
+  return (NEW_WINDOW_MODES as readonly string[]).includes(m ?? '') ? (m as NewWindowMode) : 'folderThenLast';
+}
+
 async function rememberChoice(name: string): Promise<void> {
   handoffName = name; // the reload that follows hands this account to the next start
   await ctx.workspaceState.update(K_CHOICE, name);
-  if (!vscode.workspace.workspaceFolders) {
-    await ctx.globalState.update(K_EMPTY_WINDOW, name);
-    await ctx.globalState.update(K_CARRY, { name, at: Date.now() });
-  }
+  await ctx.globalState.update(K_LAST, name);
 }
 
 // ---------- the switch itself ----------
@@ -271,6 +273,8 @@ async function panelState(): Promise<PanelState> {
     shared: sharedCounts(storeDir(home)),
     repoUrl: REPO_URL,
     siteRef: SITE_REF,
+    newWindow: newWindowMode(),
+    defaultName: (list.find((a) => a.name === cfg().get<string>('defaultAccount')) ?? list.find(isDefault) ?? list[0])?.name,
   };
 }
 
@@ -309,6 +313,11 @@ async function onPanelMessage(m: PanelMessage): Promise<void> {
       return removeSettingsEnv();
     case 'openSetting':
       if (m.arg && /^[A-Za-z0-9.]+$/.test(m.arg)) await vscode.commands.executeCommand('workbench.action.openSettings', m.arg);
+      return;
+    case 'setNewWindowAccount':
+      if (m.arg && (NEW_WINDOW_MODES as readonly string[]).includes(m.arg)) {
+        await cfg().update('newWindowAccount', m.arg, vscode.ConfigurationTarget.Global);
+      }
       return;
     case 'doctor':
       return cmdDoctor();
@@ -482,6 +491,7 @@ async function cmdRename(name?: string): Promise<void> {
     if (active?.name === target.name) active = { ...active, name: next };
     if (handoffName === target.name) handoffName = next;
     if (ctx.workspaceState.get<string>(K_CHOICE) === target.name) await ctx.workspaceState.update(K_CHOICE, next);
+    if (ctx.globalState.get<string>(K_LAST) === target.name) await ctx.globalState.update(K_LAST, next);
     if (ctx.globalState.get<string>(K_EMPTY_WINDOW) === target.name) await ctx.globalState.update(K_EMPTY_WINDOW, next);
     const login = logins.get(target.name);
     if (login) logins.set(next, login);
@@ -920,7 +930,14 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (!e.affectsConfiguration('claudeMultiAccount')) return;
-      const next = chosenAccount();
+      if (!e.affectsConfiguration('claudeMultiAccount.accounts')) {
+        // Default Account and New Window Account only decide where new windows start.
+        renderStatus();
+        void panel?.refresh();
+        return;
+      }
+      // An account that is still listed stays this window's account; pick again only when it is gone.
+      const next = (active && accounts().find((a) => a.name === currentName(active?.name))) ?? chosenAccount();
       if (next && next.name !== active?.name && sameConfigDir(configDirEnv(next, home), process.env.CLAUDE_CONFIG_DIR)) {
         // Claude Code in this window already uses this account's folder (typically the first
         // account added is ~/.claude, which the window was running on all along): no reload.
