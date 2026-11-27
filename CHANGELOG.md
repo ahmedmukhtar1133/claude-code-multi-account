@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0
+
+- New windows start on the account you picked last, in any window. Before, only a pick made in an empty window carried over, so switching inside a folder window left new windows on an older account. Folders you picked an account for still keep theirs.
+- New setting `claudeMultiAccount.newWindowAccount`: `folderThenLast` (default: a folder keeps its own pick, everything else opens on the last pick), `lastPicked` (every new window opens on the last pick) or `defaultAccount` (every new window opens on `defaultAccount`). Also in the side panel, under the accounts.
+- Changing Default Account no longer offers to reload windows that are already open; it only decides where new windows start.
+
 ## 0.1.2
 
 - Setting up the first account no longer needs a reload. When the window is already running on that account's folder (the usual case: the first account is `~/.claude`), the status bar, the panel and the Sessions tab switch to it right away. A reload is only asked for when Claude Code in the window uses a different folder.

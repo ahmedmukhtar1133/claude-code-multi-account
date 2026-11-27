@@ -23,6 +23,10 @@ export interface PanelState {
   repoUrl: string;
   /** deskworthy.app links get this query appended (ref tag). */
   siteRef: string;
+  /** claudeMultiAccount.newWindowAccount. */
+  newWindow: string;
+  /** Account a new window gets in the defaultAccount mode. */
+  defaultName?: string;
 }
 
 /** Live Deskworthy apps for the footer's daily "Try" link: name and page slug on deskworthy.app. */
@@ -121,9 +125,13 @@ document.addEventListener('click', (ev) => {
   if (tab) { showTab(tab.dataset.tab); return; }
   if (ev.target.closest('#more-btn')) { setMore(more.hidden); return; }
   const el = ev.target.closest('[data-cmd]');
-  if (!el) return;
+  if (!el || el.tagName === 'SELECT') return;
   ev.preventDefault();
   vscode.postMessage({ cmd: el.dataset.cmd, arg: el.dataset.arg });
+});
+document.addEventListener('change', (ev) => {
+  const el = ev.target.closest && ev.target.closest('select[data-cmd]');
+  if (el) vscode.postMessage({ cmd: el.dataset.cmd, arg: el.value });
 });
 document.addEventListener('keydown', (ev) => {
   const tab = ev.target.closest && ev.target.closest('[role=tab]');
@@ -160,7 +168,8 @@ document.addEventListener('keydown', (ev) => {
       <div class="actions">
         <button class="btn ghost" data-cmd="add">+ Add account</button>
         ${others.length ? `<button class="btn ghost" data-cmd="copyMcp" title="MCP servers are saved with each login, so each account has its own">${others.length === 1 ? `Copy MCP from ${esc(others[0].name)}` : 'Copy MCP servers'}</button>` : ''}
-      </div></section>`;
+      </div>
+      ${s.accounts.length > 1 ? this.newWindow(s) : ''}</section>`;
 
     const tabs = `<div class="tabs" role="tablist" aria-label="Sections">
       <button role="tab" id="t-sessions" data-tab="sessions" aria-controls="p-sessions">Sessions</button>
@@ -201,6 +210,18 @@ document.addEventListener('keydown', (ev) => {
       <div class="mut small pad">Also shared: commands, CLAUDE.md, settings, hooks, plugins. Kept per account: login, MCP servers, folder trust.</div></div>`;
 
     return `<main>${accounts}${tabs}${sessions}${status}</main>`;
+  }
+
+  private newWindow(s: PanelState): string {
+    const opts: [string, string][] = [
+      ['folderThenLast', "Folder's own pick, else last picked"],
+      ['lastPicked', 'Account picked last'],
+      ['defaultAccount', s.defaultName ? `Always ${s.defaultName}` : 'Default account'],
+    ];
+    return `<label class="nw"><span class="mut small">New windows open on</span>
+      <select data-cmd="setNewWindowAccount" title="Where a new window starts. A window that reloads or opens another folder keeps its account.">
+        ${opts.map(([v, l]) => `<option value="${v}"${v === s.newWindow ? ' selected' : ''}>${esc(l)}</option>`).join('')}
+      </select></label>`;
   }
 
   private finding(h: PanelHealth): string {
@@ -292,6 +313,10 @@ h3 { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: u
 .icon:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .actions .btn { margin-top: 0; font-size: 12px; padding: 6px 6px; flex: 1 1 auto; width: auto; white-space: nowrap; }
+.nw { display: grid; gap: 4px; margin-top: 4px; }
+.nw select { width: 100%; padding: 4px 6px; font: inherit; font-size: 12px; border-radius: 3px; cursor: pointer;
+  background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, var(--vscode-widget-border, rgba(128,128,128,.4))); }
+.nw select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 .warnText { color: var(--vscode-editorWarning-foreground, #CCA700); }
 .list { display: grid; gap: 3px; min-width: 0; }
 .list[hidden] { display: none; }

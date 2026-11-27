@@ -69,7 +69,8 @@ The settings sync with Settings Sync, and folders are relative to your home fold
   { "name": "Personal", "folder": null },          // ~/.claude
   { "name": "Work", "folder": ".claude-work" }
 ],
-"claudeMultiAccount.defaultAccount": "Personal",        // for windows that never chose one
+"claudeMultiAccount.defaultAccount": "Personal",        // until you pick an account the first time
+"claudeMultiAccount.newWindowAccount": "folderThenLast", // or "lastPicked" / "defaultAccount"
 "claudeMultiAccount.unsharedProjects": ["~/clients/nda-repo"]  // history kept per account
 ```
 
@@ -112,7 +113,7 @@ A new skill is shared with the other accounts within a few seconds; agents, comm
 ## Notes and limits
 
 - **Switching needs a window reload.** Claude Code reads the variable when it starts.
-- **The account is remembered per folder.** A folder you haven't chosen an account for follows the window it opens in: opening another folder in a Work window, or from a Work empty window, keeps Work. Once you pick an account for a folder, that folder keeps it.
+- **New windows start on the account you picked last**, in whichever window you picked it. A folder you picked an account for keeps that account, and a window keeps its account when you open another folder in it. Change this with `claudeMultiAccount.newWindowAccount`: `folderThenLast` (the default), `lastPicked` (always the last pick, folder picks ignored) or `defaultAccount` (always `defaultAccount`).
 - **Two windows on different accounts write to the same history.** This is the same situation as two windows on one account, which Claude Code already handles: sessions are separate files, and the prompt history is append-only.
 - **Usage limits stay per account.** This extension doesn't show or combine them, because reading them would mean using your login token. Use `/usage` in Claude Code.
 - **Windows:** folders use junctions. Files use symlinks when Developer Mode is on, otherwise hard links. A save can split a hard link into a separate copy; the startup repair spots that and keeps the newer copy.

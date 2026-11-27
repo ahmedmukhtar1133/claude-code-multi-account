@@ -2,7 +2,7 @@
   "name": "claude-code-multi-account-shared-history",
   "displayName": "Claude Code Multi-Account: Shared History",
   "description": "A different Claude account in each VS Code window, with one shared history, memory, skills and settings. Unofficial, not affiliated with Anthropic. Never reads login data, makes no network calls.",
-  "version": "0.1.2",
+  "version": "1.0.0",
   "publisher": "deskworthy",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -132,7 +132,23 @@
           "type": "string",
           "scope": "application",
           "default": "",
-          "description": "Account used by windows that have no account chosen yet. Empty means the default account (~/.claude)."
+          "description": "Account for new windows until you pick one (or always, when New Window Account is set to defaultAccount). Empty means the default account (~/.claude)."
+        },
+        "claudeMultiAccount.newWindowAccount": {
+          "type": "string",
+          "scope": "application",
+          "enum": [
+            "folderThenLast",
+            "lastPicked",
+            "defaultAccount"
+          ],
+          "enumDescriptions": [
+            "A folder you picked an account for opens on it; anything else opens on the account you picked last, in any window.",
+            "Every new window opens on the account you picked last, in any window. Picks for single folders are ignored.",
+            "Every new window opens on the account in Default Account (or the default account when that is empty)."
+          ],
+          "default": "folderThenLast",
+          "markdownDescription": "Which account a new window starts on. A window that reloads, or opens another folder, always keeps its own account."
         },
         "claudeMultiAccount.unsharedProjects": {
           "type": "array",
